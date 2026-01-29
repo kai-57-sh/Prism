@@ -1,0 +1,73 @@
+# Case: Gastritis Relief (Explainer/Metaphor Style)
+## User Query(Input)
+"生成一个可爱的3D科普视频，讲解胃炎胃痛的成因，把‘烧心’的感觉具象化，不要用血腥的解剖图。"
+
+## Script Output(JSON)
+```json
+{
+  "template_id": "med_gastritis_explainer",
+  "version": "1.1.0",
+  "tags": {
+    "topic": ["stomach", "gastritis", "pain", "digestion"],
+    "emotion": ["painful", "soothing", "comfortable"],
+    "style": ["explainer", "3d_render", "metaphor"],
+    "subtitle_policy": "auto"
+  },
+  "constraints": {
+    "duration_s_min": 2,
+    "duration_s_max": 15,
+    "resolution_options": ["720P", "1080P"],
+    "subtitle_policy": "auto",
+    "prompt_extend_allowed": true
+  },
+  "audio_strategy": "strategy_a",
+  "emotion_curve": ["painful", "cooling", "happy"],
+  "shot_skeletons": [
+    {
+      "shot_id": "S1",
+      "role": "hook",
+      "duration_s": 4,
+      "camera": {
+        "type": "close_up",
+        "motion": "static"
+      },
+      "visual_template": "3D illustration style. A cute pink stomach character clutching itself in pain. Small cartoon flames are burning inside it. The background is a dim orange alert color. High aesthetic 3D render, clay texture, blender 3d.",
+      "audio_template": {
+        "ambient": "sizzling sound, groan",
+        "narration": "胃痛烧心，感觉肚子里像有把火在烧？"
+      },
+      "subtitle_policy": "auto"
+    },
+    {
+      "shot_id": "S2",
+      "role": "mechanism",
+      "duration_s": 7,
+      "camera": {
+        "type": "medium",
+        "motion": "slow_pan"
+      },
+      "visual_template": "Action shot. A gentle blue cooling liquid (medicine/protection) is poured over the flames, putting them out instantly. The stomach wall forms a shiny protective shield. Satisfying visual effect, bright lighting, high quality render.",
+      "audio_template": {
+        "ambient": "water extinguishing fire sound, cool wind",
+        "narration": "这是胃黏膜受损。我们需要像灭火一样，中和胃酸，并在胃壁建立保护层。"
+      },
+      "subtitle_policy": "auto"
+    },
+    {
+      "shot_id": "S3",
+      "role": "payoff",
+      "duration_s": 4,
+      "camera": {
+        "type": "close_up",
+        "motion": "bounce"
+      },
+      "visual_template": "The stomach character turns a healthy pink color, smiling and giving a thumbs up. Floating green plus signs (+) around it. Clean white background, soft shadows.",
+      "audio_template": {
+        "ambient": "happy chime",
+        "narration": "科学养胃，修复黏膜，找回好胃口！"
+      },
+      "subtitle_policy": "auto"
+    }
+  ],
+  "negative_prompt_base": "text, realistic organs, blood, surgery, disgusting, dark, horror, low resolution, distortion"
+}

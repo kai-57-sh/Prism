@@ -1,0 +1,73 @@
+# Case: Discovery of X-rays (Documentary/History Style)
+## User Query(Input)
+"我想重现伦琴发现X射线的历史瞬间，要有一种神秘的、胶片电影般的效果。"
+
+## Script Output(JSON)
+```json
+{
+  "template_id": "med_xray_history",
+  "version": "1.0.0",
+  "tags": {
+    "topic": ["history", "x_ray", "science", "roentgen", "imaging"],
+    "emotion": ["mysterious", "shocked", "awe"],
+    "style": ["documentary", "noir", "vintage"],
+    "subtitle_policy": "auto"
+  },
+  "constraints": {
+    "duration_s_min": 2,
+    "duration_s_max": 15,
+    "resolution_options": ["720P", "1080P"],
+    "subtitle_policy": "auto",
+    "prompt_extend_allowed": true
+  },
+  "audio_strategy": "strategy_a",
+  "emotion_curve": ["mysterious", "scary", "revolutionary"],
+  "shot_skeletons": [
+    {
+      "shot_id": "S1",
+      "role": "hook",
+      "duration_s": 5,
+      "camera": {
+        "type": "wide",
+        "motion": "static"
+      },
+      "visual_template": "Germany, 1895. A pitch-black laboratory room. A cathode ray tube sits on a table, emitting a faint, eerie ghost-like green glow. Heavy shadows (chiaroscuro), noir atmosphere, vintage film grain, 720p.",
+      "audio_template": {
+        "ambient": "electrical hum, static crackle",
+        "narration": "1895年的深夜，一束看不见的幽光，穿透了人类认知的黑暗。"
+      },
+      "subtitle_policy": "auto"
+    },
+    {
+      "shot_id": "S2",
+      "role": "mechanism",
+      "duration_s": 6,
+      "camera": {
+        "type": "close_up",
+        "motion": "slow_push_in"
+      },
+      "visual_template": "The famous historical shot: A hand is placed in front of a fluorescent screen. Suddenly, the skeletal bones inside the hand become visible in silhouette, wearing a ring. High contrast black and white, dramatic and shocking visualization.",
+      "audio_template": {
+        "ambient": "shocking sound effect, gasp",
+        "narration": "伦琴惊愕地看到，血肉瞬间透明，指骨在荧光屏上清晰可见。"
+      },
+      "subtitle_policy": "auto"
+    },
+    {
+      "shot_id": "S3",
+      "role": "payoff",
+      "duration_s": 4,
+      "camera": {
+        "type": "medium",
+        "motion": "morph_transition"
+      },
+      "visual_template": "Visual transition. The old grainy black and white X-ray film morphs into a modern, high-tech blue digital CT scan, rotating smoothly. Clean, futuristic medical aesthetic.",
+      "audio_template": {
+        "ambient": "digital scan sound, future tech hum",
+        "narration": "这一眼，让医学从此拥有了一双看穿人体的‘透视眼’。"
+      },
+      "subtitle_policy": "auto"
+    }
+  ],
+  "negative_prompt_base": "text, color in shot 1/2, modern clothes, cartoon, bad anatomy, extra fingers, low resolution"
+}

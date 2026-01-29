@@ -1,0 +1,73 @@
+# Case: Closed Comedones Improvement(LifeStyle)
+## User Query(Input)
+"写一个护肤分享类的视频脚本，主题是改善闭口粉刺，画面要真实自然，像博主在浴室自拍。"
+
+## Script Output(JSON)
+```json
+{
+  "template_id": "med_comedones",
+  "version": "1.0.0",
+  "tags": {
+    "topic": ["skincare", "acne", "beauty", "bathroom"],
+    "emotion": ["annoyed", "careful", "confident"],
+    "style": ["lifestyle", "real_person", "vlog"],
+    "subtitle_policy": "auto"
+  },
+  "constraints": {
+    "duration_s_min": 2,
+    "duration_s_max": 15,
+    "resolution_options": ["720P", "1080P"],
+    "subtitle_policy": "auto",
+    "prompt_extend_allowed": true
+  },
+  "audio_strategy": "strategy_a",
+  "emotion_curve": ["annoyed", "focused", "happy"],
+  "shot_skeletons": [
+    {
+      "shot_id": "S1",
+      "role": "hook",
+      "duration_s": 4,
+      "camera": {
+        "type": "close_up",
+        "motion": "static"
+      },
+      "visual_template": "High-detail macro shot of a young woman's cheek in a bathroom mirror. The focus is on the subtle skin texture and small bumps (comedones). She touches her face with a frown, looking annoyed. Bright, realistic lighting, 720p masterpiece.",
+      "audio_template": {
+        "ambient": "bathroom echo, skin rubbing sound",
+        "narration": "脸颊摸起来粗糙，反复长闭口？"
+      },
+      "subtitle_policy": "auto"
+    },
+    {
+      "shot_id": "S2",
+      "role": "mechanism",
+      "duration_s": 7,
+      "camera": {
+        "type": "close_up",
+        "motion": "slow_pan"
+      },
+      "visual_template": "Commercial grade skincare shot. The woman is gently applying a light-texture moisturizer to her face. The cream texture is visible and watery. Soft, diffused beauty lighting, clean background. High aesthetic score, fresh vibe.",
+      "audio_template": {
+        "ambient": "water splash, bottle cap click",
+        "narration": "这是油脂堵塞。切记别手挤！做好温和清洁，选用清爽保湿乳。"
+      },
+      "subtitle_policy": "auto"
+    },
+    {
+      "shot_id": "S3",
+      "role": "payoff",
+      "duration_s": 4,
+      "camera": {
+        "type": "medium",
+        "motion": "handheld"
+      },
+      "visual_template": "The woman looks at the camera with a confident smile. Her skin looks smooth, hydrated and glowing (glass skin effect). High-key lighting, beauty filter aesthetic, photorealistic texture.",
+      "audio_template": {
+        "ambient": "sparkle sound effect, happy hum",
+        "narration": "简单几步，改善闭口，养出光滑脸蛋~"
+      },
+      "subtitle_policy": "auto"
+    }
+  ],
+  "negative_prompt_base": "text, subtitles, watermark, logo, severe acne, blood, dirty bathroom, distortion, low resolution, ugly"
+}

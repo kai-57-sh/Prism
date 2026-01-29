@@ -1,0 +1,73 @@
+# Case: Brain Fog Improvement(LifeStyle)
+## User Query(Input)
+"我想做一个给熬夜党看的‘脑雾’科普视频，展示那种思维迟钝的状态，并给出简单的恢复建议。"
+
+## Script Output(JSON)
+```json
+{
+  "template_id": "med_brain_fog",
+  "version": "1.0.0",
+  "tags": {
+    "topic": ["brain_fog", "focus", "office_worker", "fatigue"],
+    "emotion": ["confused", "relaxed", "sharp"],
+    "style": ["lifestyle", "real_person", "vlog"],
+    "subtitle_policy": "auto"
+  },
+  "constraints": {
+    "duration_s_min": 2,
+    "duration_s_max": 15,
+    "resolution_options": ["720P", "1080P"],
+    "subtitle_policy": "auto",
+    "prompt_extend_allowed": true
+  },
+  "audio_strategy": "strategy_a",
+  "emotion_curve": ["confused", "calm", "confident"],
+  "shot_skeletons": [
+    {
+      "shot_id": "S1",
+      "role": "hook",
+      "duration_s": 4,
+      "camera": {
+        "type": "close_up",
+        "motion": "slow_push_in"
+      },
+      "visual_template": "High-quality office shot, natural lighting. A young professional sitting at a messy desk, rubbing their forehead, looking visibly confused and mentally foggy. Depth of field focuses on the tired expression. 720p masterpiece, cinematic texture.",
+      "audio_template": {
+        "ambient": "office typing sound, sigh",
+        "narration": "总走神忘事、思维迟钝？小心，这是‘脑雾’在作怪！"
+      },
+      "subtitle_policy": "auto"
+    },
+    {
+      "shot_id": "S2",
+      "role": "mechanism",
+      "duration_s": 7,
+      "camera": {
+        "type": "medium",
+        "motion": "pan_follow"
+      },
+      "visual_template": "Dynamic movement shot. The person stands up and walks to a bright window to stretch their arms. They are holding a glass of warm water. Sunlight streams in, hitting the water glass and creating beautiful caustics and volumetric lighting. Relaxing atmosphere.",
+      "audio_template": {
+        "ambient": "deep breath sound, soft fabric rustle",
+        "narration": "闭眼休息、远眺拉伸、多喝温水，给大脑充充电。"
+      },
+      "subtitle_policy": "auto"
+    },
+    {
+      "shot_id": "S3",
+      "role": "payoff",
+      "duration_s": 4,
+      "camera": {
+        "type": "close_up",
+        "motion": "handheld"
+      },
+      "visual_template": "Back at the desk, the person looks directly at the camera with a sharp, energetic gaze and a confident smile. They snap their fingers or make a salute gesture. Clean background, sharp focus, high aesthetic score.",
+      "audio_template": {
+        "ambient": "energetic ding sound",
+        "narration": "简单几步，赶走脑雾，找回清晰思维~"
+      },
+      "subtitle_policy": "auto"
+    }
+  ],
+  "negative_prompt_base": "text, subtitles, watermark, logo, distorted face, extra fingers, messy background, blur, low resolution"
+}
