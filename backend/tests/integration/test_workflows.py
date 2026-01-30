@@ -86,6 +86,7 @@ class TestGenerationWorkflow:
         ir = IR(
             topic="insomnia",
             intent="mood_video",
+            optimized_prompt="Calming insomnia video in a bedroom at night.",
             style={"visual": "calm", "color_tone": "warm", "lighting": "soft"},
             scene={"location": "bedroom", "time": "night"},
             characters=[],
@@ -203,6 +204,7 @@ class TestGenerationWorkflow:
             ir = IR(
                 topic="anxiety",
                 intent="mood_video",
+                optimized_prompt="Anxiety-themed video with a calm, warm night setting.",
                 style={"visual": "calm", "color_tone": "warm", "lighting": "soft"},
                 scene={"location": "room", "time": "night"},
                 characters=[],
@@ -312,6 +314,7 @@ class TestRevisionWorkflow:
             ir={
                 "topic": "insomnia",
                 "intent": "mood_video",
+                "optimized_prompt": "Calming insomnia video in a bedroom at night.",
                 "style": {"visual": "calm", "color_tone": "warm", "lighting": "soft"},
                 "scene": {"location": "bedroom", "time": "night"},
                 "characters": [],

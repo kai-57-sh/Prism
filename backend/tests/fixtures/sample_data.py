@@ -10,6 +10,7 @@ from typing import Dict, List, Any
 SAMPLE_IR = {
     "topic": "失眠",
     "intent": "mood_video",
+    "optimized_prompt": "A calming insomnia video set in a quiet bedroom at night.",
     "style": {
         "visual": "舒缓风格",
         "color_tone": "暖色调",
@@ -136,6 +137,7 @@ SAMPLE_JOB = {
     "ir": {
         "topic": "失眠",
         "intent": "mood_video",
+        "optimized_prompt": "A calming insomnia video set in a quiet bedroom at night.",
         "style": {"visual": "舒缓"}
     },
     "shot_plan": {

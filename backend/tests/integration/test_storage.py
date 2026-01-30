@@ -21,6 +21,7 @@ class TestJobDB:
             ir={
                 "topic": "失眠",
                 "intent": "mood_video",
+                "optimized_prompt": "A calming insomnia video set in a bedroom at night.",
                 "style": {"visual": "舒缓"}
             },
             shot_plan={

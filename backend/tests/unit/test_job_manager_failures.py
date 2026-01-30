@@ -26,6 +26,7 @@ def _base_ir(quality_mode="balanced"):
     return IR(
         topic="insomnia",
         intent="mood_video",
+        optimized_prompt="Insomnia video in a bedroom at night with calm tone.",
         style={"visual": "calm", "color_tone": "warm", "lighting": "soft"},
         scene={"location": "bedroom", "time": "night"},
         characters=[],

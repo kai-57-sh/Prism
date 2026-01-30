@@ -807,6 +807,8 @@ class JobManager:
         from src.core.llm_orchestrator import IR as IRModel
         ir_model = modified_ir
         if isinstance(modified_ir, dict):
+            if not modified_ir.get("optimized_prompt"):
+                modified_ir["optimized_prompt"] = parent_job.user_input_redacted or ""
             ir_model = IRModel(**modified_ir)
 
         shot_plan = self.llm_orchestrator.instantiate_template(

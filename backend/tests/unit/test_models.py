@@ -56,6 +56,7 @@ class TestJobModel:
         ir_data = {
             "topic": "失眠",
             "intent": "mood_video",
+            "optimized_prompt": "A calming insomnia video set in a bedroom at night.",
             "style": {"visual": "舒缓"}
         }
 
@@ -114,6 +115,7 @@ class TestIR:
         ir = IR(
             topic="失眠",
             intent="mood_video",
+            optimized_prompt="A calming insomnia video in a bedroom at night.",
             style={"visual": "舒缓"},
             scene={"location": "卧室"},
             characters=[],
@@ -126,6 +128,7 @@ class TestIR:
 
         assert ir.topic == "失眠"
         assert ir.intent == "mood_video"
+        assert ir.optimized_prompt
         assert ir.duration_preference_s == 10
 
 

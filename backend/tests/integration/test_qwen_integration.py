@@ -138,6 +138,7 @@ class TestLLMOrchestratorIntegration:
 
         assert ir.topic
         assert ir.intent
+        assert ir.optimized_prompt
         assert ir.duration_preference_s > 0
         assert ir.quality_mode == "balanced"
         print(f"Parsed IR: {ir}")
@@ -151,6 +152,7 @@ class TestLLMOrchestratorIntegration:
         ir = orchestrator.parse_ir(user_input, quality_mode="high")
 
         assert ir.topic == "失眠" or "失眠" in ir.topic
+        assert ir.optimized_prompt
         assert ir.style
         assert ir.style.get("color_tone") == "暖色调" or "暖" in ir.style.get("color_tone", "")
         assert ir.scene
@@ -166,6 +168,7 @@ class TestLLMOrchestratorIntegration:
         ir = IR(
             topic="失眠",
             intent="mood_video",
+            optimized_prompt="A calming insomnia video in a bedroom at night.",
             style={"visual": "舒缓", "color_tone": "暖色调"},
             scene={"location": "卧室", "time": "夜晚"},
             characters=[],
@@ -195,6 +198,7 @@ class TestLLMOrchestratorIntegration:
         previous_ir = {
             "topic": "失眠",
             "intent": "mood_video",
+            "optimized_prompt": "A calming insomnia video in a bedroom at night.",
             "style": {"visual": "舒缓"},
             "scene": {"location": "卧室"},
             "characters": [],

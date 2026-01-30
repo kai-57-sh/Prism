@@ -19,6 +19,9 @@ class IR(BaseModel):
 
     topic: str = Field(description="Primary topic (e.g., 'insomnia', 'anxiety', 'depression')")
     intent: str = Field(description="User intent (e.g., 'mood_video', 'story_telling')")
+    optimized_prompt: str = Field(
+        description="LLM-refined prompt that preserves user intent and key details for storyboard writing"
+    )
     style: Dict[str, str] = Field(description="Visual style preferences")
     scene: Dict[str, str] = Field(description="Scene setting")
     characters: List[Dict[str, str]] = Field(description="Character descriptions")
@@ -95,14 +98,23 @@ Quality Mode: {quality_mode}
 Extract the following information:
 1. topic: Main medical/emotional topic
 2. intent: User's goal (e.g., 'mood_video', 'story_telling')
-3. style: Visual style (visual approach, color tone, lighting)
-4. scene: Location and time setting
-5. characters: List of characters with type, gender, age_range
-6. emotion_curve: List of emotions across shots (start to end)
-7. subtitle_policy: 'none' or 'allowed' based on user preference
-8. audio: Audio requirements (mode, narration_language, narration_tone, sfx list)
-9. duration_preference_s: Total duration in seconds (2-15)
-10. quality_mode: '{quality_mode}'
+3. optimized_prompt: Rewrite the user request into a concise creative brief for storyboard writing.
+   Preserve intent and constraints; do not introduce conflicts or unrelated details.
+   Requirements for optimized_prompt:
+   - English only: use plain English and avoid non-English words or scripts.
+   - No medical advice: do not provide diagnosis, prescriptions, treatment plans, or specific interventions.
+   - No absolutes: avoid absolute/guarantee terms (e.g., cure, miracle, guarantee, best, perfect, 100%).
+   - No marketing tone: avoid sensationalism, fear, or clickbait; keep calm, objective, trustworthy, warm.
+   - Scope: focus on mechanisms, prevention awareness, lifestyle adjustments, and medical history.
+   - Prefer neutral terms such as management, improvement, reduce discomfort, support.
+4. style: Visual style (visual approach, color tone, lighting)
+5. scene: Location and time setting
+6. characters: List of characters with type, gender, age_range
+7. emotion_curve: List of emotions across shots (start to end)
+8. subtitle_policy: 'none' or 'allowed' based on user preference
+9. audio: Audio requirements (mode, narration_language, narration_tone, sfx list)
+10. duration_preference_s: Total duration in seconds (2-15)
+11. quality_mode: '{quality_mode}'
 
 {self.ir_parser.get_format_instructions()}
 
@@ -119,6 +131,8 @@ Ensure all durations are between 2-15 seconds total."""
 
             # Parse structured output
             ir = self.ir_parser.parse(response.content)
+            if not ir.optimized_prompt.strip():
+                ir.optimized_prompt = user_input
 
             duration = time.time() - start_time
             self.metrics["ir_parse_duration"] = duration
@@ -160,6 +174,7 @@ Ensure all durations are between 2-15 seconds total."""
         prompt = f"""You are a medical video director. Instantiate the following template with concrete values based on the user's intent.
 
 **User Intent:**
+- Optimized Prompt: {ir.optimized_prompt}
 - Topic: {ir.topic}
 - Emotion Curve: {', '.join(ir.emotion_curve)}
 - Style: {ir.style}
@@ -176,13 +191,32 @@ Version: {template['version']}
 Shot Skeletons:
 {self._format_shot_skeletons(template['shot_skeletons'])}
 
-**Instructions:**
-1. Fill in template placeholders with concrete values matching the user's intent
-2. Ensure visual descriptions are detailed and evocative
-3. Generate appropriate narration for each shot
-4. Match the emotion curve across shots
-5. Respect the subtitle policy
-6. Total duration should be approximately {ir.duration_preference_s}s
+**Instructions (English only):**
+1. Use the optimized prompt as the primary creative brief for the storyboard.
+2. Fill in template placeholders with concrete values matching the optimized prompt.
+3. If any template detail conflicts with the optimized prompt, adapt the template to fit the optimized prompt.
+4. Visual style selection (no mixing across shots):
+   - If the optimized prompt explicitly specifies a style (vlog, 3D, documentary), follow it.
+   - Otherwise choose the most suitable style category:
+     a) Patient experience / lifestyle: vlog, real people, daily life, symptom checks; natural light, home/office.
+     b) Medical mechanism / explainer: 3D animation, mechanism, metaphor, cute; high-end 3D render, clean studio look.
+     c) Medical history / documentary: history, story, year, discovery, black-and-white; retro cinematic chiaroscuro, film grain.
+5. Scientific arc across shots (3-shot narrative):
+   - Shot 1 (problem): observe a real-world health issue; no excessive pain.
+   - Shot 2 (mechanism): explain why it happens scientifically or biologically.
+   - Shot 3 (understanding): emphasize knowledge, understanding, or risk awareness only.
+     Do NOT imply symptom improvement or health outcomes in Shot 3.
+6. Visual prompt constraints (Wan 2.2):
+   - Each shot's visual description must be in English and must include the exact keywords:
+     "cinematic lighting", "volumetric fog", "720p masterpiece", "high aesthetic score".
+   - Use a resolution preference of either "720P" or "1080P" and store it in global_style.resolution_preference.
+7. Audio strategy:
+   - Narration must be Chinese (colloquial but professional).
+   - Strict character limits: Shot 1 <= 12 Chinese characters, Shot 2 <= 24, Shot 3 <= 16.
+8. Ensure visual descriptions are detailed and evocative.
+9. Match the emotion curve across shots.
+10. Respect the subtitle policy.
+11. Total duration should be approximately {ir.duration_preference_s}s.
 
 {self.shot_plan_parser.get_format_instructions()}"""
 

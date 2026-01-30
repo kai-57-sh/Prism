@@ -60,7 +60,7 @@ def mock_qwen_llm():
     """Mock Qwen LLM"""
     mock = Mock()
     mock.invoke = Mock(return_value=Mock(
-        content='{"topic": "测试主题", "intent": "测试意图"}'
+        content='{"topic": "测试主题", "intent": "测试意图", "optimized_prompt": "Optimized prompt."}'
     ))
     return mock
 
@@ -105,6 +105,7 @@ def sample_ir():
     return {
         "topic": "失眠",
         "intent": "mood_video",
+        "optimized_prompt": "A calming insomnia video set in a bedroom at night.",
         "style": {
             "visual": "舒缓风格",
             "color_tone": "暖色调",
@@ -239,7 +240,8 @@ def sample_job():
         input_hash="abc123",
         ir={
             "topic": "失眠",
-            "intent": "mood_video"
+            "intent": "mood_video",
+            "optimized_prompt": "A calming insomnia video set in a bedroom at night."
         },
         shot_plan={},
         shot_requests=[],

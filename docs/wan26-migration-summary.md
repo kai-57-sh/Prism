@@ -213,29 +213,36 @@ class Settings(BaseSettings):
 
 ### 视频生成流程
 
-1. **用户输入处理** (`InputProcessor`)
-   - PII 脱敏
-   - 语言检测
-   - 可选翻译
+1. **请求接入与输入处理** (`/v1/t2v/generate`, `JobManager`)
+   - `RateLimiter` 做并发/频次限制。
+   - `InputProcessor.process_input` 完成 PII 脱敏、语言检测、对齐翻译，得到 `redacted_text/aligned_text`。
 
 2. **IR 解析** (`LLMOrchestrator.parse_ir`)
-   - 使用 Qwen3-235B 解析用户意图
-   - 生成中间表示（IR）
+   - 基于 Qwen3-235B 解析用户意图，输出 IR（`topic/intent/style/scene/characters/emotion_curve/audio/duration_preference_s/quality_mode`）。
 
-3. **模板匹配** (`TemplateRouter.match_template`)
-   - 使用 Embeddings 进行语义搜索
-   - 选择最佳模板
+3. **模板匹配与镜头计划** (`TemplateRouter` + `LLMOrchestrator.instantiate_template`)
+   - 通过 Embeddings（或关键词兜底）匹配模板。
+   - 生成 `ShotPlan`（`shots[]/duration_s/subtitle_policy/global_style`），并做 `_normalize_shot_plan` 统一 `shot_id` 与时长。
 
-4. **模板实例化** (`LLMOrchestrator.instantiate_template`)
-   - 使用 Qwen3-235B 填充模板
-   - 生成详细的镜头计划
+4. **参数校验与请求编译** (`Validator` + `PromptCompiler`)
+   - `Validator.validate_parameters` 校验时长、分辨率、quality 模式限制等。
+   - `compile_shot_prompt` 生成 `shot_requests[]`，包含 `compiled_prompt/compiled_negative_prompt/params(size,duration,seed,watermark)`。
 
-5. **视频生成** (`Wan26Adapter`)
-   - 为每个镜头调用 Wan2.6-t2v
-   - 使用 DashScope SDK
+5. **任务落库与状态流转** (`JobDB` + `job_state`)
+   - 写入 `ir/shot_plan/shot_requests/quality_mode/resolution` 等中间态。
+   - 状态：`CREATED -> SUBMITTED -> RUNNING`。
 
-6. **视频合成** (`VideoComposer`)
-   - 使用 FFmpeg 合成最终视频
+6. **分镜生成与下载** (`Wan26RetryAdapter` + `Wan26Downloader`)
+   - 每个镜头按 `QUALITY_MODES.preview_seeds` 生成多 seed 候选。
+   - DashScope 提交/轮询完成后下载生成的视频文件。
+
+7. **音视频拆分与资产落盘** (`FFmpegSplitter` + `AssetStorage`)
+   - FFmpeg 拆分 `video/audio`（失败则保留视频-only）。
+   - 生成 `video_url/audio_url` 并落盘至 `static/{video,audio}`。
+
+8. **结果写入与元数据输出** (`JobDB.update_job_assets` + `write_job_metadata`)
+   - 写入 `shot_assets[]`（每条包含 `shot_id/seed/model_task_id/raw_video_url/video_url/audio_url/duration_s/resolution`）。
+   - 输出 `static/metadata/{job_id}.json`，状态更新为 `SUCCEEDED`，`GET /v1/t2v/jobs/{job_id}` 返回结果。
 
 ---
 

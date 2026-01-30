@@ -23,6 +23,7 @@ class IRModel(Base):
     id = Column(Integer, primary_key=True, index=True)
     topic = Column(String, nullable=False, index=True)
     intent = Column(String, nullable=False)
+    optimized_prompt = Column(String, nullable=True)
     style = Column(JSON, nullable=False)  # {"visual": "cinematic_realistic", "color_tone": "cool_dark", "lighting": "low_light"}
     scene = Column(JSON, nullable=False)  # {"location": "bedroom", "time": "midnight"}
     characters = Column(JSON, nullable=False)  # [{"type": "human", "gender": "unspecified", "age_range": "adult"}]
@@ -38,6 +39,7 @@ class IRModel(Base):
         return {
             "topic": self.topic,
             "intent": self.intent,
+            "optimized_prompt": self.optimized_prompt,
             "style": self.style,
             "scene": self.scene,
             "characters": self.characters,
@@ -54,6 +56,7 @@ class IR(BaseModel):
 
     topic: str
     intent: str
+    optimized_prompt: str
     style: Dict[str, Any]
     scene: Dict[str, Any]
     characters: List[Dict[str, Any]]
