@@ -173,6 +173,31 @@ class TestTemplateRouter:
 
         assert retrieved is None
 
+    def test_match_template_fallbacks_to_default(self, router: TemplateRouter, test_db_session):
+        """Test fallback to default template when matching fails"""
+        from src.services.storage import TemplateDB
+
+        TemplateDB.create_template(
+            db=test_db_session,
+            template_id=router.DEFAULT_TEMPLATE_ID,
+            version=router.DEFAULT_TEMPLATE_VERSION,
+            tags={"topic": ["general_health"], "style": ["lifestyle"], "emotion": []},
+            constraints={"duration_s_min": 2, "duration_s_max": 15},
+            shot_skeletons=[],
+            negative_prompt_base="",
+        )
+
+        router.embeddings = None
+        router.faiss_index = None
+        ir = {"topic": "nonexistent", "style": {}, "scene": {}, "emotion_curve": []}
+
+        match = router.match_template(ir, test_db_session, min_confidence=0.99)
+
+        assert match is not None
+        assert match.template_id == router.DEFAULT_TEMPLATE_ID
+        assert match.version == router.DEFAULT_TEMPLATE_VERSION
+        assert match.confidence_components.get("fallback") == 1.0
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -29,6 +29,9 @@ class TemplateRouter:
     Route user requests to appropriate medical scene templates using semantic search
     """
 
+    DEFAULT_TEMPLATE_ID = "med_general_health"
+    DEFAULT_TEMPLATE_VERSION = "1.0.0"
+
     def __init__(self):
         """Initialize template router using DashScope embeddings"""
         self.embeddings = None
@@ -145,9 +148,13 @@ class TemplateRouter:
             template_dicts = [t.to_dict() for t in templates]
             self.build_index(template_dicts)
 
+        if not template_dicts:
+            template_dicts = list(self.template_metadata.values())
+
         if self.faiss_index is None:
             # Fallback to keyword matching when embeddings are unavailable.
-            return self._keyword_match(ir, template_dicts, top_k, min_confidence)
+            keyword_match = self._keyword_match(ir, template_dicts, top_k, min_confidence)
+            return keyword_match or self._fallback_template(db)
 
         # Create search query from IR
         query = self._create_query_from_ir(ir)
@@ -157,7 +164,8 @@ class TemplateRouter:
             results = self.faiss_index.similarity_search_with_score(query, k=top_k)
 
             if not results:
-                return None
+                keyword_match = self._keyword_match(ir, template_dicts, top_k, min_confidence)
+                return keyword_match or self._fallback_template(db)
 
             # Rank results by combined confidence
             ranked = self._rank_results(ir, results)
@@ -166,8 +174,8 @@ class TemplateRouter:
             if ranked and ranked[0].confidence >= min_confidence:
                 return ranked[0]
             else:
-                # Below threshold - trigger clarification
-                return None
+                keyword_match = self._keyword_match(ir, template_dicts, top_k, min_confidence)
+                return keyword_match or self._fallback_template(db)
 
         except Exception as e:
             log_template_hit(
@@ -176,7 +184,31 @@ class TemplateRouter:
                 confidence_components={},
                 job_id=None,
             )
+            keyword_match = self._keyword_match(ir, template_dicts, top_k, min_confidence)
+            return keyword_match or self._fallback_template(db)
+
+    def _fallback_template(self, db: Session) -> Optional[TemplateMatch]:
+        template = TemplateDB.get_template(
+            db,
+            self.DEFAULT_TEMPLATE_ID,
+            self.DEFAULT_TEMPLATE_VERSION,
+        )
+        if not template:
+            logger.warning(
+                "default_template_missing",
+                template_id=self.DEFAULT_TEMPLATE_ID,
+                template_version=self.DEFAULT_TEMPLATE_VERSION,
+            )
             return None
+
+        template_dict = template.to_dict()
+        return TemplateMatch(
+            template_id=template_dict["template_id"],
+            version=template_dict["version"],
+            confidence=0.0,
+            confidence_components={"fallback": 1.0},
+            template=template_dict,
+        )
 
     def _keyword_match(
         self,

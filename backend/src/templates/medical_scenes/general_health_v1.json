@@ -1,0 +1,67 @@
+{
+  "template_id": "med_general_health",
+  "version": "1.0.0",
+  "tags": {
+    "topic": ["general_health", "wellness", "health_education", "prevention", "subhealth"],
+    "emotion": ["concerned", "informative", "assured"],
+    "style": ["lifestyle", "real_person", "clean_medical"],
+    "subtitle_policy": "auto"
+  },
+  "constraints": {
+    "duration_s_min": 2,
+    "duration_s_max": 15,
+    "resolution_options": ["720P", "1080P"],
+    "subtitle_policy": "auto",
+    "prompt_extend_allowed": true
+  },
+  "audio_strategy": "strategy_a",
+  "emotion_curve": ["concerned", "clear", "reassured"],
+  "shot_skeletons": [
+    {
+      "shot_id": "S1",
+      "role": "hook",
+      "duration_s": 4,
+      "camera": {
+        "type": "close_up",
+        "motion": "slow_push_in"
+      },
+      "visual_template": "Lifestyle health scene. A person at home or in an office rubs their neck and stares at the screen, looking slightly tired and unfocused. Soft window light, shallow depth of field, realistic skin texture, 720p.",
+      "audio_template": {
+        "ambient": "room tone, soft sigh",
+        "narration": "经常疲惫、睡不醒、注意力下降? 这可能是身体发出的亚健康信号。"
+      },
+      "subtitle_policy": "auto"
+    },
+    {
+      "shot_id": "S2",
+      "role": "mechanism",
+      "duration_s": 7,
+      "camera": {
+        "type": "medium",
+        "motion": "slow_pan"
+      },
+      "visual_template": "Clean, bright montage in one frame: a balanced plate of food, a person stretching with a water bottle, and a calm evening routine scene. Natural daylight, tidy environment, warm and reassuring mood.",
+      "audio_template": {
+        "ambient": "light kitchen sounds, gentle breathing",
+        "narration": "规律作息、均衡饮食、适度运动、补充水分,给身体系统一次温和修复。"
+      },
+      "subtitle_policy": "auto"
+    },
+    {
+      "shot_id": "S3",
+      "role": "payoff",
+      "duration_s": 4,
+      "camera": {
+        "type": "close_up",
+        "motion": "slow_zoom_out"
+      },
+      "visual_template": "The person steps outdoors into soft morning light, smiles with clear eyes, and moves with renewed energy. Fresh color grading, clean background, high aesthetic quality.",
+      "audio_template": {
+        "ambient": "morning birds, uplifting chime",
+        "narration": "坚持基础健康习惯,状态回升更有活力; 不适持续请及时就医。"
+      },
+      "subtitle_policy": "auto"
+    }
+  ],
+  "negative_prompt_base": "text, subtitles, watermark, logo, blood, surgery, needles, scary, low resolution, distortion"
+}

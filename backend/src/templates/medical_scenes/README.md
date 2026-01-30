@@ -54,6 +54,11 @@ This directory contains JSON video generation templates for medical health educa
    - Shots: 3 (hook, mechanism, payoff)
    - Setting: 1895 Germany laboratory
 
+10. **general_health_v1.json** - General health and wellness education
+   - Style: Lifestyle/Clean Medical
+   - Emotions: concerned → clear → reassured
+   - Shots: 3 (hook, mechanism, payoff)
+
 ### Existing Templates
 
 - **anxiety_v1.json** - Anxiety management
@@ -145,8 +150,9 @@ Templates are loaded by the Prism backend's `TemplateRouter` using FAISS semanti
 - Digestive health (gastritis)
 - Cardiovascular health (hypertension)
 - Sleep health (insomnia, strength training)
+- General wellness (baseline health education)
 - Medical history (penicillin, X-rays)
 
-## Total Templates: 12
-- 9 new medical scene templates
+## Total Templates: 13
+- 10 new medical scene templates
 - 3 existing mental health templates
