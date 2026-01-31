@@ -28,6 +28,13 @@ export interface ShotAsset {
   duration_s: number;
 }
 
+export interface ShotPlanShot {
+  shot_id: number;
+  visual_prompt: string;
+  narration: string;
+  duration: number;
+}
+
 export interface JobStatusResponse {
   job_id: string;
   status: 'CREATED' | 'SUBMITTED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED';
@@ -60,6 +67,17 @@ export interface ReviseResponse {
     targeted_fields: string[];
 }
 
+export interface ShotPlanUpdateRequest {
+  visual_prompt?: string;
+  narration?: string;
+}
+
+export interface ShotRegenerateResponse {
+  shot_id: number;
+  asset?: ShotAsset;
+  message: string;
+}
+
 
 export const api = {
   // Submit planning job (script + shot plan only)
@@ -90,5 +108,25 @@ export const api = {
   reviseVideo: async (jobId: string, feedback: string): Promise<ReviseResponse> => {
       const response = await apiClient.post<ReviseResponse>(`/jobs/${jobId}/revise`, { feedback });
       return response.data;
-  }
+  },
+
+  // Update a single shot in the shot plan
+  updateShotPlan: async (
+    jobId: string,
+    shotId: number,
+    payload: ShotPlanUpdateRequest
+  ): Promise<ShotPlanShot> => {
+    const response = await apiClient.patch<ShotPlanShot>(`/jobs/${jobId}/shots/${shotId}`, payload);
+    return response.data;
+  },
+
+  // Regenerate a single shot
+  regenerateShot: async (
+    jobId: string,
+    shotId: number,
+    payload?: ShotPlanUpdateRequest
+  ): Promise<ShotRegenerateResponse> => {
+    const response = await apiClient.post<ShotRegenerateResponse>(`/jobs/${jobId}/shots/${shotId}/regenerate`, payload || {});
+    return response.data;
+  },
 };

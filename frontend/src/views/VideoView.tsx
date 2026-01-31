@@ -1,25 +1,49 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Play, Pause, SkipBack, SkipForward, Volume2, Download, MessageSquare } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Volume2, Download, Loader2 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
+import { api } from '../api/client';
 import { VideoTrackItem, AudioTrackItem } from '../components/TimelineTracks';
 
 export const VideoView = () => {
-  const { shotAssets, updateShotDuration } = useAppStore();
+  const { shotAssets, updateShotDuration, shotPlan, currentJobId, setShotAssets, updateShotPlanShot } = useAppStore();
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeShotIndex, setActiveShotIndex] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const secondaryVideoRef = useRef<HTMLVideoElement>(null);
   const pendingSeekTimeRef = useRef<number | null>(null);
   const [volume, setVolume] = useState(0.8);
   const [isVolumeOpen, setIsVolumeOpen] = useState(false);
   const [isDownloadOpen, setIsDownloadOpen] = useState(false);
   const volumeWrapRef = useRef<HTMLDivElement>(null);
   const downloadWrapRef = useRef<HTMLDivElement>(null);
+  const [shotEdits, setShotEdits] = useState<Record<number, { visual: string; narration: string }>>({});
+  const [comparisonByShot, setComparisonByShot] = useState<Record<number, { previous: any; current: any }>>({});
+  const [comparisonShotId, setComparisonShotId] = useState<number | null>(null);
+  const [comparisonView, setComparisonView] = useState<'current' | 'previous'>('current');
+  const [regeneratingShotId, setRegeneratingShotId] = useState<number | null>(null);
+  const [savingShots, setSavingShots] = useState<Record<number, boolean>>({});
+  const shotCount = shotPlan?.length ?? 0;
+
+  const baseActiveAsset = shotAssets && shotAssets.length > 0 ? shotAssets[activeShotIndex] : undefined;
+  const activeShotId = baseActiveAsset?.shot_id ?? activeShotIndex + 1;
+  const comparisonEntry = comparisonShotId !== null ? comparisonByShot[comparisonShotId] : undefined;
+  const isComparing = Boolean(
+    comparisonEntry &&
+    comparisonShotId === activeShotId &&
+    comparisonEntry.previous &&
+    comparisonEntry.current
+  );
+  const currentAsset = isComparing ? comparisonEntry?.current : baseActiveAsset;
+  const previousAsset = isComparing ? comparisonEntry?.previous : undefined;
+  const activeAsset = isComparing
+    ? (comparisonView === 'current' ? currentAsset : previousAsset)
+    : baseActiveAsset;
 
   // Use the first generated video if available, or fallback to mock
-  const currentVideoUrl = shotAssets && shotAssets.length > 0 ? shotAssets[activeShotIndex].video_url : "";
-  const currentAudioUrl = shotAssets && shotAssets.length > 0 ? shotAssets[activeShotIndex].audio_url : "";
-  const isVideo = shotAssets && shotAssets.length > 0;
+  const currentVideoUrl = activeAsset?.video_url || "";
+  const currentAudioUrl = activeAsset?.audio_url || "";
+  const isVideo = Boolean(currentVideoUrl);
 
   // Placeholder images for filmstrip effect - using colored placeholders to avoid CORB
   const getPlaceholderStyle = (index: number) => {
@@ -44,7 +68,7 @@ export const VideoView = () => {
 
   const totalDuration = shotAssets ? shotAssets.reduce((acc, shot) => acc + (shot.duration_s || 5), 0) : 20;
   // Get duration of current active shot from metadata (fallback)
-  const plannedShotDuration = shotAssets && shotAssets.length > 0 ? (shotAssets[activeShotIndex].duration_s || 5) : 5;
+  const plannedShotDuration = activeAsset ? (activeAsset.duration_s || 5) : 5;
   
   const [globalTime, setGlobalTime] = useState(0);
   // State for current shot local time for the progress bar
@@ -68,6 +92,18 @@ export const VideoView = () => {
           }
       }
   }, [activeShotIndex, currentAudioUrl, isPlaying]);
+
+  useEffect(() => {
+      if (!isComparing || !videoRef.current) return;
+      if (videoRef.current.readyState >= 1) {
+          videoRef.current.currentTime = localTime;
+      } else {
+          pendingSeekTimeRef.current = localTime;
+      }
+      if (audioRef.current && currentAudioUrl) {
+          audioRef.current.currentTime = localTime;
+      }
+  }, [comparisonView, isComparing, currentVideoUrl, currentAudioUrl]);
 
   // Sync global time with video play
   useEffect(() => {
@@ -148,6 +184,20 @@ export const VideoView = () => {
   }, [volume, currentVideoUrl, currentAudioUrl]);
 
   useEffect(() => {
+    if (!isComparing || !secondaryVideoRef.current) return;
+    if (!isPlaying) {
+        if (secondaryVideoRef.current.readyState >= 1) {
+            secondaryVideoRef.current.currentTime = localTime;
+        }
+        return;
+    }
+    const delta = Math.abs(secondaryVideoRef.current.currentTime - localTime);
+    if (delta > 0.15) {
+        secondaryVideoRef.current.currentTime = localTime;
+    }
+  }, [localTime, isComparing, isPlaying, comparisonView, currentAsset?.video_url, previousAsset?.video_url]);
+
+  useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
         const target = event.target as Node;
         if (volumeWrapRef.current && !volumeWrapRef.current.contains(target)) {
@@ -161,6 +211,53 @@ export const VideoView = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  useEffect(() => {
+    if (!shotPlan || shotPlan.length === 0) return;
+    setShotEdits((prev) => {
+        const next = { ...prev };
+        shotPlan.forEach((shot) => {
+            if (!next[shot.shot_id]) {
+                next[shot.shot_id] = {
+                    visual: shot.visual_prompt || '',
+                    narration: shot.narration || '',
+                };
+            }
+        });
+        return next;
+    });
+  }, [shotPlan]);
+
+  useEffect(() => {
+    const textareas = document.querySelectorAll<HTMLTextAreaElement>('[data-autoresize="true"]');
+    textareas.forEach((el) => {
+        const maxHeight = Number(el.dataset.maxheight || '160');
+        el.style.height = 'auto';
+        const nextHeight = Math.min(el.scrollHeight, maxHeight);
+        el.style.height = `${nextHeight}px`;
+        el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden';
+    });
+  }, [shotEdits, shotPlan]);
+
+  useEffect(() => {
+    if (!shotAssets || shotAssets.length === 0) return;
+    setComparisonByShot((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        Object.keys(prev).forEach((key) => {
+            const shotId = Number(key);
+            const asset = shotAssets.find((item) => item.shot_id === shotId);
+            if (!asset) return;
+            const existing = prev[shotId];
+            if (!existing) return;
+            if (existing.current?.video_url !== asset.video_url || existing.current?.audio_url !== asset.audio_url) {
+                next[shotId] = { previous: existing.previous, current: asset };
+                changed = true;
+            }
+        });
+        return changed ? next : prev;
+    });
+  }, [shotAssets]);
+
   const handleVideoDurationChange = (e: React.SyntheticEvent<HTMLVideoElement>) => {
       const vid = e.currentTarget;
       if (vid.duration && !isNaN(vid.duration)) {
@@ -173,6 +270,87 @@ export const VideoView = () => {
               updateShotDuration(activeShotIndex, vid.duration);
           }
       }
+  };
+
+  const persistShotEdits = async (shotId: number) => {
+    if (!currentJobId) return;
+    const edits = shotEdits[shotId];
+    if (!edits) return;
+
+    setSavingShots((prev) => ({ ...prev, [shotId]: true }));
+    try {
+        await api.updateShotPlan(currentJobId, shotId, {
+            visual_prompt: edits.visual,
+            narration: edits.narration,
+        });
+        updateShotPlanShot(shotId, {
+            visual_prompt: edits.visual,
+            narration: edits.narration,
+        });
+    } catch (e) {
+        console.error('Shot plan update failed', e);
+    } finally {
+        setSavingShots((prev) => ({ ...prev, [shotId]: false }));
+    }
+  };
+
+  const handleRegenerateShot = async (shotId: number) => {
+    if (!currentJobId || !shotAssets || shotAssets.length === 0) return;
+    const index = shotAssets.findIndex((asset) => asset.shot_id === shotId);
+    if (index === -1) return;
+
+    const edits = shotEdits[shotId];
+    setRegeneratingShotId(shotId);
+    try {
+        const res = await api.regenerateShot(currentJobId, shotId, {
+            visual_prompt: edits?.visual,
+            narration: edits?.narration,
+        });
+        if (res.asset) {
+            const previousAsset = shotAssets[index];
+            setComparisonByShot((prev) => ({
+                ...prev,
+                [shotId]: {
+                    previous: prev[shotId]?.current || previousAsset,
+                    current: res.asset,
+                },
+            }));
+            const nextAssets = [...shotAssets];
+            nextAssets[index] = res.asset;
+            setShotAssets(nextAssets);
+            setComparisonShotId(shotId);
+            setComparisonView('current');
+            setActiveShotIndex(index);
+        }
+    } catch (e) {
+        console.error('Shot regeneration failed', e);
+    } finally {
+        setRegeneratingShotId(null);
+    }
+  };
+
+  const handleScriptEdit = (shotId: number, field: 'visual' | 'narration', value: string) => {
+    setShotEdits((prev) => ({
+        ...prev,
+        [shotId]: {
+            visual: field === 'visual' ? value : (prev[shotId]?.visual ?? ''),
+            narration: field === 'narration' ? value : (prev[shotId]?.narration ?? ''),
+        },
+    }));
+    updateShotPlanShot(shotId, field === 'visual' ? { visual_prompt: value } : { narration: value });
+  };
+
+  const handleTextareaChange = (
+    shotId: number,
+    field: 'visual' | 'narration',
+    event: React.ChangeEvent<HTMLTextAreaElement>,
+  ) => {
+    handleScriptEdit(shotId, field, event.target.value);
+    const maxHeight = Number(event.target.dataset.maxheight || '160');
+    event.target.style.height = 'auto';
+    const nextHeight = Math.min(event.target.scrollHeight, maxHeight);
+    event.target.style.height = `${nextHeight}px`;
+    event.target.style.overflowY = event.target.scrollHeight > maxHeight ? 'auto' : 'hidden';
   };
 
   // Handle local seek (progress bar)
@@ -369,37 +547,89 @@ export const VideoView = () => {
 
   return (
     <div className="flex h-full bg-zinc-900 text-white overflow-hidden">
-      {/* Left Feedback Panel */}
+      {/* Left Storyboard Panel */}
       <div className="w-72 bg-zinc-800 border-r border-zinc-700 flex flex-col">
-        {/* ... (Previous Left Panel Code) ... */}
-        <div className="p-4 border-b border-zinc-700">
-            <h2 className="font-semibold text-lg mb-1">健康科普视频</h2>
-            <div className="flex gap-4 text-xs text-zinc-400">
-                <span>720P</span>
-                <span>30 FPS</span>
-                <span>Generated</span>
-            </div>
-        </div>
-        
-        <div className="flex-1 p-4 overflow-y-auto">
-            <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">微调建议</h3>
-            <div className="space-y-3">
-                <div className="bg-zinc-700/50 p-3 rounded-lg text-sm border border-zinc-600">
-                   <p className="text-zinc-400 text-xs italic">暂无建议。请在下方输入框提交修改意见。</p>
-                </div>
-            </div>
-        </div>
-
-        <div className="p-4 border-t border-zinc-700 bg-zinc-800">
-            <div className="relative">
-                <input 
-                    type="text" 
-                    placeholder="输入修改意见..." 
-                    className="w-full bg-zinc-900 border border-zinc-600 rounded-lg py-2 px-3 text-sm focus:outline-none focus:border-primary-500"
-                />
-                <button className="absolute right-2 top-2 text-primary-500 hover:text-primary-400">
-                    <MessageSquare size={16} />
-                </button>
+        <div className="flex-1 p-4 overflow-y-auto no-scrollbar">
+            <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">分镜脚本</h3>
+            <div className={clsx(
+                "grid gap-3",
+                shotCount > 0 && shotCount <= 3 ? "grid-rows-[repeat(3,minmax(0,1fr))] h-full" : ""
+            )}>
+                {shotPlan && shotPlan.length > 0 ? (
+                    shotPlan.map((shot) => {
+                        const edits = shotEdits[shot.shot_id] || { visual: '', narration: '' };
+                        return (
+                            <div
+                                key={shot.shot_id}
+                                className="bg-zinc-700/40 p-3 rounded-lg text-sm border border-zinc-600 flex flex-col h-full"
+                                onClick={() => {
+                                    const index = shotAssets?.findIndex((asset) => asset.shot_id === shot.shot_id) ?? -1;
+                                    if (index >= 0) setActiveShotIndex(index);
+                                }}
+                            >
+                                <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-xs font-semibold text-zinc-200">镜头 {shot.shot_id}</span>
+                                        {savingShots[shot.shot_id] && (
+                                            <span className="text-[10px] text-zinc-400">保存中...</span>
+                                        )}
+                                    </div>
+                                    <button
+                                        className={clsx(
+                                            "text-xs px-2 py-1 rounded-md border transition-colors flex items-center gap-1",
+                                            regeneratingShotId === shot.shot_id
+                                                ? "bg-green-100 text-green-700 border-green-200"
+                                                : "bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
+                                        )}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleRegenerateShot(shot.shot_id);
+                                        }}
+                                        disabled={regeneratingShotId === shot.shot_id}
+                                    >
+                                        {regeneratingShotId === shot.shot_id ? (
+                                            <>
+                                                <Loader2 size={12} className="animate-spin" /> 生成中
+                                            </>
+                                        ) : (
+                                            "重新生成"
+                                        )}
+                                    </button>
+                                </div>
+                                <div className="space-y-2 flex-1 overflow-hidden">
+                                    <div>
+                                        <div className="text-[11px] text-zinc-400 mb-1">画面</div>
+                                        <textarea
+                                            rows={1}
+                                            value={edits.visual}
+                                            onChange={(e) => handleTextareaChange(shot.shot_id, 'visual', e)}
+                                            onBlur={() => persistShotEdits(shot.shot_id)}
+                                            data-autoresize="true"
+                                            data-maxheight="140"
+                                            className="w-full resize-none rounded-md bg-zinc-900/70 border border-zinc-600 px-2 py-1 text-xs text-zinc-100 focus:outline-none focus:border-primary-500 min-h-[72px] no-scrollbar"
+                                        />
+                                    </div>
+                                    <div>
+                                        <div className="text-[11px] text-zinc-400 mb-1">旁白</div>
+                                        <textarea
+                                            rows={1}
+                                            value={edits.narration}
+                                            onChange={(e) => handleTextareaChange(shot.shot_id, 'narration', e)}
+                                            onBlur={() => persistShotEdits(shot.shot_id)}
+                                            data-autoresize="true"
+                                            data-maxheight="96"
+                                            className="w-full resize-none rounded-md bg-zinc-900/70 border border-zinc-600 px-2 py-1 text-xs text-zinc-100 focus:outline-none focus:border-primary-500 min-h-[56px] no-scrollbar"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })
+                ) : (
+                    <div className="bg-zinc-700/40 p-3 rounded-lg text-xs text-zinc-400 border border-zinc-600">
+                        暂无分镜脚本。
+                    </div>
+                )}
             </div>
         </div>
       </div>
@@ -413,16 +643,64 @@ export const VideoView = () => {
                     {/* Video Content */}
                     <div className="absolute inset-0 flex items-center justify-center bg-zinc-900">
                         {isVideo ? (
-                            <video 
-                                ref={videoRef}
-                                key={currentVideoUrl} 
-                                src={currentVideoUrl} 
-                                className={clsx("w-full h-full object-contain transition-all duration-75", isDragging && "blur-[2px] opacity-80 scale-[1.01]")} 
-                                controls={false}
-                                onEnded={handleVideoEnded}
-                                onDurationChange={handleVideoDurationChange}
-                                onLoadedMetadata={handleVideoLoadedMetadata}
-                            />
+                            isComparing && currentAsset?.video_url && previousAsset?.video_url ? (
+                                <div
+                                    className="relative w-full h-full cursor-pointer"
+                                    onClick={(e) => {
+                                        const target = e.target as HTMLElement;
+                                        if (target.closest('button')) return;
+                                        setComparisonView((prev) => (prev === 'current' ? 'previous' : 'current'));
+                                    }}
+                                >
+                                    <video
+                                        ref={comparisonView === 'current' ? videoRef : secondaryVideoRef}
+                                        key={currentAsset.video_url}
+                                        src={currentAsset.video_url}
+                                        className={clsx(
+                                            "absolute inset-0 w-full h-full object-contain transition-all duration-150",
+                                            comparisonView === 'current' ? "opacity-100" : "opacity-0",
+                                            comparisonView === 'current' && isDragging && "blur-[2px] opacity-80 scale-[1.01]"
+                                        )}
+                                        controls={false}
+                                        muted={comparisonView !== 'current'}
+                                        onEnded={comparisonView === 'current' ? handleVideoEnded : undefined}
+                                        onDurationChange={comparisonView === 'current' ? handleVideoDurationChange : undefined}
+                                        onLoadedMetadata={comparisonView === 'current' ? handleVideoLoadedMetadata : undefined}
+                                    />
+                                    <video
+                                        ref={comparisonView === 'current' ? secondaryVideoRef : videoRef}
+                                        key={previousAsset.video_url}
+                                        src={previousAsset.video_url}
+                                        className={clsx(
+                                            "absolute inset-0 w-full h-full object-contain transition-all duration-150",
+                                            comparisonView === 'current' ? "opacity-0" : "opacity-100",
+                                            comparisonView !== 'current' && isDragging && "blur-[2px] opacity-80 scale-[1.01]"
+                                        )}
+                                        controls={false}
+                                        muted={comparisonView === 'current'}
+                                        onEnded={comparisonView === 'current' ? undefined : handleVideoEnded}
+                                        onDurationChange={comparisonView === 'current' ? undefined : handleVideoDurationChange}
+                                        onLoadedMetadata={comparisonView === 'current' ? undefined : handleVideoLoadedMetadata}
+                                    />
+                                    <span className="absolute top-3 left-3 text-[11px] px-2 py-0.5 rounded-full bg-black/50 text-white border border-white/10">
+                                        {comparisonView === 'current' ? '当前版本' : '上一版'}
+                                    </span>
+                                    <span className="absolute bottom-3 left-1/2 -translate-x-1/2 text-[11px] px-2 py-0.5 rounded-full bg-white/10 text-white border border-white/10">
+                                        点击切换版本
+                                    </span>
+                                </div>
+                            ) : (
+                                <video 
+                                    ref={videoRef}
+                                    key={currentVideoUrl} 
+                                    src={currentVideoUrl} 
+                                    className={clsx("w-full h-full object-contain transition-all duration-75", isDragging && "blur-[2px] opacity-80 scale-[1.01]")} 
+                                    controls={false}
+                                    onEnded={handleVideoEnded}
+                                    onDurationChange={handleVideoDurationChange}
+                                    onLoadedMetadata={handleVideoLoadedMetadata}
+                                />
+                            )
                         ) : (
                             <div className="w-full h-full flex items-center justify-center bg-zinc-800 text-zinc-600">
                                 <p>No Video Available</p>
@@ -438,7 +716,7 @@ export const VideoView = () => {
                         />
                         
                         {!isPlaying && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                            <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/20">
                                 <button 
                                     onClick={() => setIsPlaying(true)}
                                     className="w-16 h-16 bg-white/10 backdrop-blur-sm rounded-full flex items-center justify-center hover:bg-white/20 transition-all transform hover:scale-105"

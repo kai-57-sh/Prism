@@ -5,7 +5,7 @@ Asset Storage Service - Manages video, audio, and metadata file paths
 import os
 import json
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from pathlib import Path
 
 from src.config.settings import settings
@@ -40,6 +40,7 @@ class AssetStorage:
         job_id: str,
         shot_id: int,
         extension: str = "mp4",
+        suffix: Optional[str] = None,
     ) -> str:
         """
         Get storage path for video file
@@ -53,7 +54,10 @@ class AssetStorage:
             Absolute file path for video storage
         """
         date_str = datetime.utcnow().strftime("%Y/%m/%d")
-        filename = f"{job_id}_shot_{shot_id}.{extension}"
+        base = f"{job_id}_shot_{shot_id}"
+        if suffix:
+            base = f"{base}_{suffix}"
+        filename = f"{base}.{extension}"
         path = os.path.join(self.video_dir, date_str, filename)
 
         # Ensure date directory exists
@@ -66,6 +70,7 @@ class AssetStorage:
         job_id: str,
         shot_id: int,
         extension: str = "mp3",
+        suffix: Optional[str] = None,
     ) -> str:
         """
         Get storage path for audio file
@@ -79,7 +84,10 @@ class AssetStorage:
             Absolute file path for audio storage
         """
         date_str = datetime.utcnow().strftime("%Y/%m/%d")
-        filename = f"{job_id}_shot_{shot_id}.{extension}"
+        base = f"{job_id}_shot_{shot_id}"
+        if suffix:
+            base = f"{base}_{suffix}"
+        filename = f"{base}.{extension}"
         path = os.path.join(self.audio_dir, date_str, filename)
 
         # Ensure date directory exists
@@ -106,6 +114,7 @@ class AssetStorage:
         job_id: str,
         shot_id: int,
         extension: str = "mp4",
+        suffix: Optional[str] = None,
     ) -> str:
         """
         Get URL for video file
@@ -119,7 +128,10 @@ class AssetStorage:
             URL path for video file
         """
         date_str = datetime.utcnow().strftime("%Y/%m/%d")
-        filename = f"{job_id}_shot_{shot_id}.{extension}"
+        base = f"{job_id}_shot_{shot_id}"
+        if suffix:
+            base = f"{base}_{suffix}"
+        filename = f"{base}.{extension}"
         return f"{self.static_url_prefix}/{self.video_subdir}/{date_str}/{filename}"
 
     def get_audio_url(
@@ -127,6 +139,7 @@ class AssetStorage:
         job_id: str,
         shot_id: int,
         extension: str = "mp3",
+        suffix: Optional[str] = None,
     ) -> str:
         """
         Get URL for audio file
@@ -140,7 +153,10 @@ class AssetStorage:
             URL path for audio file
         """
         date_str = datetime.utcnow().strftime("%Y/%m/%d")
-        filename = f"{job_id}_shot_{shot_id}.{extension}"
+        base = f"{job_id}_shot_{shot_id}"
+        if suffix:
+            base = f"{base}_{suffix}"
+        filename = f"{base}.{extension}"
         return f"{self.static_url_prefix}/{self.audio_subdir}/{date_str}/{filename}"
 
     def get_metadata_url(self, job_id: str) -> str:

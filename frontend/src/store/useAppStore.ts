@@ -20,6 +20,7 @@ interface StoreState {
   
   shotPlan: Array<any> | undefined; // Simplified for now, or define Shot interface
   setShotPlan: (plan: Array<any> | undefined) => void;
+  updateShotPlanShot: (shotId: number, updates: { visual_prompt?: string; narration?: string }) => void;
 
   shotAssets: Array<any> | undefined;
   setShotAssets: (assets: Array<any> | undefined) => void;
@@ -43,6 +44,18 @@ export const useAppStore = create<StoreState>((set) => ({
 
   shotPlan: undefined,
   setShotPlan: (plan) => set({ shotPlan: plan }),
+  updateShotPlanShot: (shotId, updates) => set((state) => {
+      if (!state.shotPlan) return {};
+      const nextPlan = state.shotPlan.map((shot) => {
+          if (shot?.shot_id !== shotId) return shot;
+          return {
+              ...shot,
+              ...(updates.visual_prompt !== undefined ? { visual_prompt: updates.visual_prompt } : {}),
+              ...(updates.narration !== undefined ? { narration: updates.narration } : {}),
+          };
+      });
+      return { shotPlan: nextPlan };
+  }),
 
   shotAssets: undefined,
   setShotAssets: (assets) => set({ shotAssets: assets }),
@@ -55,4 +68,3 @@ export const useAppStore = create<StoreState>((set) => ({
       return { shotAssets: newAssets };
   }),
 }));
-

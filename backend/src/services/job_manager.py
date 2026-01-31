@@ -534,14 +534,16 @@ class JobManager:
         quality_mode = job.quality_mode
 
         # Get number of preview seeds based on quality mode
-        preview_seeds = QUALITY_MODES[quality_mode]["preview_seeds"]
+        default_preview_seeds = QUALITY_MODES[quality_mode]["preview_seeds"]
 
         async def _generate_shot_candidates(
             shot_request: Dict[str, Any],
         ) -> Tuple[List[Dict[str, Any]], List[str]]:
             shot_id = shot_request["shot_id"]
+            output_suffix = shot_request.get("output_suffix")
             shot_candidates: List[Dict[str, Any]] = []
             task_ids: List[str] = []
+            preview_seeds = shot_request.get("preview_seeds", default_preview_seeds)
 
             # Generate multiple preview candidates
             for _ in range(preview_seeds):
@@ -576,8 +578,16 @@ class JobManager:
                         )
 
                         # Split video/audio
-                        video_path = self.asset_storage.get_video_storage_path(job.job_id, shot_id)
-                        audio_path = self.asset_storage.get_audio_storage_path(job.job_id, shot_id)
+                        video_path = self.asset_storage.get_video_storage_path(
+                            job.job_id,
+                            shot_id,
+                            suffix=output_suffix,
+                        )
+                        audio_path = self.asset_storage.get_audio_storage_path(
+                            job.job_id,
+                            shot_id,
+                            suffix=output_suffix,
+                        )
 
                         try:
                             split_result = await asyncio.to_thread(
@@ -587,7 +597,11 @@ class JobManager:
                                 audio_path,
                             )
 
-                            audio_url = self.asset_storage.get_audio_url(job.job_id, shot_id)
+                            audio_url = self.asset_storage.get_audio_url(
+                                job.job_id,
+                                shot_id,
+                                suffix=output_suffix,
+                            )
                             duration_s = split_result["duration_s"]
 
                             # Clean up temp file
@@ -610,7 +624,11 @@ class JobManager:
                             "seed": shot_request["params"]["seed"],
                             "model_task_id": status_response.task_id,
                             "raw_video_url": status_response.video_url,
-                            "video_url": self.asset_storage.get_video_url(job.job_id, shot_id),
+                            "video_url": self.asset_storage.get_video_url(
+                                job.job_id,
+                                shot_id,
+                                suffix=output_suffix,
+                            ),
                             "audio_url": audio_url,
                             "video_path": video_path,
                             "audio_path": audio_path,

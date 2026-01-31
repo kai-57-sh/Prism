@@ -5,11 +5,13 @@ Jobs API Routes
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
+from datetime import datetime
 import re
 from sqlalchemy.orm import Session
 
 from src.models import get_db
-from src.services.storage import JobDB
+from src.services.storage import JobDB, TemplateDB
+from src.services.job_manager import JobManager
 from src.services.observability import logger
 
 
@@ -61,6 +63,21 @@ class JobStatusResponse(BaseModel):
     shot_plan: Optional[ShotPlanResponse] = None
     assets: Optional[List[ShotAssetResponse]] = None
     error: Optional[Dict[str, Any]] = None
+
+
+class ShotPlanUpdateRequest(BaseModel):
+    """Request to update a single shot plan entry."""
+
+    visual_prompt: Optional[str] = None
+    narration: Optional[str] = None
+
+
+class ShotRegenerateResponse(BaseModel):
+    """Response for shot regeneration."""
+
+    shot_id: int
+    asset: Optional[ShotAssetResponse] = None
+    message: str
 
 
 def _coerce_int(value: Any) -> Optional[int]:
@@ -159,6 +176,44 @@ def _build_script(shot_plan: Optional[ShotPlanResponse]) -> Optional[str]:
     return "\n".join(lines).strip()
 
 
+def _update_shot_plan_fields(
+    shot_plan: Dict[str, Any],
+    shot_id: int,
+    visual_prompt: Optional[str] = None,
+    narration: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    if not isinstance(shot_plan, dict):
+        return None
+    shots = shot_plan.get("shots")
+    if not isinstance(shots, list):
+        return None
+
+    for idx, shot in enumerate(shots):
+        if not isinstance(shot, dict):
+            continue
+        if _coerce_shot_id(shot.get("shot_id"), idx + 1) != shot_id:
+            continue
+
+        if visual_prompt is not None:
+            shot["visual_prompt"] = visual_prompt
+            shot["visual_template"] = visual_prompt
+            shot["visual"] = visual_prompt
+
+        if narration is not None:
+            audio = shot.get("audio")
+            if not isinstance(audio, dict):
+                audio = {}
+            audio["narration"] = narration
+            shot["audio"] = audio
+            shot["narration"] = narration
+
+        shots[idx] = shot
+        shot_plan["shots"] = shots
+        return shot
+
+    return None
+
+
 def _normalize_shot_assets(
     shot_assets: Optional[List[Dict[str, Any]]],
     default_resolution: Optional[str],
@@ -203,6 +258,186 @@ def _select_primary_assets(shot_assets: List[Dict[str, Any]]) -> List[Dict[str, 
 
 # Router
 router = APIRouter()
+
+
+@router.patch("/jobs/{job_id}/shots/{shot_id}", response_model=ShotPlanShotResponse)
+async def update_job_shot(
+    job_id: str,
+    shot_id: int,
+    request: ShotPlanUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    """Update a single shot's visual prompt or narration."""
+    job = JobDB.get_job(db, job_id)
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": {
+                    "code": "JOB_NOT_FOUND",
+                    "message": f"Job {job_id} not found",
+                }
+            }
+        )
+
+    updated_shot = _update_shot_plan_fields(
+        job.shot_plan,
+        shot_id,
+        request.visual_prompt,
+        request.narration,
+    )
+    if not updated_shot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": {
+                    "code": "SHOT_NOT_FOUND",
+                    "message": f"Shot {shot_id} not found",
+                }
+            }
+        )
+
+    JobDB.update_job_shot_plan(db, job_id, job.shot_plan)
+
+    return ShotPlanShotResponse(
+        shot_id=_coerce_shot_id(updated_shot.get("shot_id"), shot_id),
+        visual_prompt=_extract_visual_prompt(updated_shot),
+        narration=_extract_narration(updated_shot),
+        duration=_coerce_duration(updated_shot.get("duration_s"))
+        or _coerce_duration(updated_shot.get("duration"))
+        or _coerce_duration(updated_shot.get("length_s"))
+        or 0,
+    )
+
+
+@router.post("/jobs/{job_id}/shots/{shot_id}/regenerate", response_model=ShotRegenerateResponse)
+async def regenerate_job_shot(
+    job_id: str,
+    shot_id: int,
+    request: Optional[ShotPlanUpdateRequest] = None,
+    db: Session = Depends(get_db),
+):
+    """Regenerate a single shot and return the new asset."""
+    job = JobDB.get_job(db, job_id)
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": {
+                    "code": "JOB_NOT_FOUND",
+                    "message": f"Job {job_id} not found",
+                }
+            }
+        )
+
+    if job.state != "SUCCEEDED":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": {
+                    "code": "INVALID_JOB_STATE",
+                    "message": f"Job must be in SUCCEEDED state to regenerate, current state: {job.state}",
+                }
+            }
+        )
+
+    shot_plan = job.shot_plan or {}
+    updated_shot = _update_shot_plan_fields(
+        shot_plan,
+        shot_id,
+        request.visual_prompt if request else None,
+        request.narration if request else None,
+    )
+    if not updated_shot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": {
+                    "code": "SHOT_NOT_FOUND",
+                    "message": f"Shot {shot_id} not found",
+                }
+            }
+        )
+
+    if request and (request.visual_prompt is not None or request.narration is not None):
+        JobDB.update_job_shot_plan(db, job_id, shot_plan)
+
+    template = TemplateDB.get_template(db, job.template_id, job.template_version)
+    template_dict = template.to_dict() if template else {}
+
+    job_manager = JobManager()
+    compiled = job_manager.prompt_compiler.compile_shot_prompt(
+        shot=updated_shot,
+        shot_plan=shot_plan,
+        ir=job.ir,
+        negative_prompt_base=template_dict.get("negative_prompt_base", ""),
+        prompt_extend=False,
+        quality_mode=job.quality_mode,
+    )
+
+    output_suffix = f"regen_{int(datetime.utcnow().timestamp())}"
+    regen_request = {
+        "shot_id": updated_shot.get("shot_id", shot_id),
+        "compiled_prompt": compiled.compiled_prompt,
+        "compiled_negative_prompt": compiled.compiled_negative_prompt,
+        "params": compiled.params,
+        "output_suffix": output_suffix,
+        "preview_seeds": 1,
+    }
+
+    new_assets = await job_manager._generate_shots(
+        db=db,
+        job=job,
+        shot_requests=[regen_request],
+    )
+
+    if not new_assets:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": {
+                    "code": "REGENERATE_FAILED",
+                    "message": f"Failed to regenerate shot {shot_id}",
+                }
+            }
+        )
+
+    stored_request = {
+        "shot_id": regen_request["shot_id"],
+        "compiled_prompt": regen_request["compiled_prompt"],
+        "compiled_negative_prompt": regen_request["compiled_negative_prompt"],
+        "params": regen_request["params"],
+    }
+    shot_requests = list(job.shot_requests or [])
+    updated = False
+    for idx, req in enumerate(shot_requests):
+        if _coerce_shot_id(req.get("shot_id"), idx + 1) == shot_id:
+            shot_requests[idx] = stored_request
+            updated = True
+            break
+    if not updated:
+        shot_requests.append(stored_request)
+
+    job.shot_requests = shot_requests
+    db.commit()
+    db.refresh(job)
+
+    existing_assets = list(job.shot_assets or [])
+    filtered_assets = [
+        asset for asset in existing_assets
+        if _coerce_shot_id(asset.get("shot_id"), 0) != shot_id
+    ]
+    updated_assets = new_assets + filtered_assets
+    JobDB.update_job_assets(db, job.job_id, updated_assets)
+
+    normalized_assets = _normalize_shot_assets(new_assets, job.resolution) or []
+    asset = normalized_assets[0] if normalized_assets else None
+
+    return ShotRegenerateResponse(
+        shot_id=_coerce_shot_id(updated_shot.get("shot_id"), shot_id),
+        asset=asset,
+        message="shot_regenerated",
+    )
 
 
 @router.get("/jobs/{job_id}", response_model=JobStatusResponse)
