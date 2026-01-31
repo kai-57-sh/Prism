@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Sparkles, User, Bot, Paperclip } from 'lucide-react';
+import { Send, Sparkles, User, Bot } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { api } from '../api/client';
 import clsx from 'clsx';
@@ -8,7 +8,14 @@ import { motion } from 'framer-motion';
 export const Sidebar = () => {
   const { messages, addMessage, setAppState, appState, setCurrentJobId, setScript, setShotPlan, setShotAssets, currentJobId } = useAppStore();
   const [input, setInput] = useState('');
+  const [selectedStyle, setSelectedStyle] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const styleOptions = [
+    { label: '扁平插画', promptValue: '扁平插画' },
+    { label: '3D 卡通', promptValue: '3D卡通' },
+    { label: '真人实拍', promptValue: '真人实拍' },
+    { label: 'MG 动画', promptValue: 'MG动画' },
+  ];
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -61,14 +68,16 @@ export const Sidebar = () => {
         return;
     }
     const userInput = input;
-    addMessage('user', userInput);
+    const stylePrompt = selectedStyle ? `\n风格：${selectedStyle}` : '';
+    const promptWithStyle = `${userInput}${stylePrompt}`;
+    addMessage('user', promptWithStyle);
     setInput('');
     
     if (appState === 'IDLE' || appState === 'COMPLETED') {
       setAppState('THINKING');
       try {
           const res = await api.planVideo({
-              user_prompt: userInput,
+              user_prompt: promptWithStyle,
               quality_mode: 'balanced',
               resolution: '1280x720'
           });
@@ -88,7 +97,7 @@ export const Sidebar = () => {
        // Revise logic
        setAppState('THINKING');
        try {
-           const res = await api.reviseVideo(currentJobId, userInput);
+           const res = await api.reviseVideo(currentJobId, promptWithStyle);
            setCurrentJobId(res.job_id); // Update to new revision job id
            addMessage('ai', '收到修改意见，正在重新生成...');
            pollJobStatus(res.job_id);
@@ -149,11 +158,23 @@ export const Sidebar = () => {
 
       <div className="p-4 border-t border-zinc-100 bg-white">
          <div className="flex gap-2 mb-3 overflow-x-auto pb-2 scrollbar-hide no-scrollbar">
-            {['扁平插画', '3D 卡通', '真人实拍', 'MG 动画'].map(style => (
-                <button key={style} className="px-3 py-1 bg-zinc-50 border border-zinc-200 rounded-full text-xs text-zinc-600 whitespace-nowrap hover:bg-primary-50 hover:text-primary-600 hover:border-primary-200 transition-all duration-200">
-                    {style}
+            {styleOptions.map((style) => {
+              const isSelected = selectedStyle === style.promptValue;
+              return (
+                <button
+                  key={style.label}
+                  onClick={() => setSelectedStyle(isSelected ? null : style.promptValue)}
+                  className={clsx(
+                    "px-3 py-1 border rounded-full text-xs whitespace-nowrap transition-all duration-200",
+                    isSelected
+                      ? "bg-green-50 border-green-200 text-green-700"
+                      : "bg-zinc-50 border-zinc-200 text-zinc-600 hover:bg-primary-50 hover:text-primary-600 hover:border-primary-200"
+                  )}
+                >
+                  {style.label}
                 </button>
-            ))}
+              );
+            })}
          </div>
         <div className="relative group">
           <textarea
@@ -164,7 +185,6 @@ export const Sidebar = () => {
             className="w-full p-3 pr-12 bg-zinc-50 border border-zinc-200 rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 text-sm h-24 transition-all duration-200 group-hover:bg-white group-hover:shadow-sm"
           />
           <div className="absolute bottom-3 right-3 flex gap-2">
-             <button className="p-1.5 text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 rounded-lg transition-colors"><Paperclip size={16} /></button>
              <button 
                 onClick={handleSend} 
                 disabled={!input.trim()}

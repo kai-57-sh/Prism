@@ -100,7 +100,8 @@ class Wan26Adapter:
                 raise ImportError("dashscope VideoSynthesis is not available")
 
             # Use DashScope VideoSynthesis async_call
-            rsp = VideoSynthesis.async_call(
+            rsp = await asyncio.to_thread(
+                VideoSynthesis.async_call,
                 api_key=self.api_key,
                 model='wan2.6-t2v',
                 prompt=request.prompt,
@@ -168,7 +169,11 @@ class Wan26Adapter:
                 task_id=task_id,
             )
 
-            rsp = VideoSynthesis.wait(task=task_id, api_key=self.api_key)
+            rsp = await asyncio.to_thread(
+                VideoSynthesis.wait,
+                task=task_id,
+                api_key=self.api_key,
+            )
 
             if rsp.status_code == HTTPStatus.OK:
                 output_payload: Dict[str, Any] = (

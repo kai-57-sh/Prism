@@ -7,7 +7,7 @@ import os
 import re
 import shutil
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from src.models.job import JobModel
@@ -536,13 +536,15 @@ class JobManager:
         # Get number of preview seeds based on quality mode
         preview_seeds = QUALITY_MODES[quality_mode]["preview_seeds"]
 
-        # Generate preview candidates per shot
-        for shot_request in shot_requests:
+        async def _generate_shot_candidates(
+            shot_request: Dict[str, Any],
+        ) -> Tuple[List[Dict[str, Any]], List[str]]:
             shot_id = shot_request["shot_id"]
-            shot_candidates = []
+            shot_candidates: List[Dict[str, Any]] = []
+            task_ids: List[str] = []
 
             # Generate multiple preview candidates
-            for seed_idx in range(preview_seeds):
+            for _ in range(preview_seeds):
                 try:
                     # Submit shot request
                     from src.core.wan26_adapter import ShotGenerationRequest
@@ -557,22 +559,29 @@ class JobManager:
                         watermark=shot_request["params"]["watermark"],
                     )
 
-                    response = await self.wan26_adapter.submit_shot_request_with_retry(gen_request)
-                    external_task_ids.append(response.task_id)
+                    submit_response = await self.wan26_adapter.submit_shot_request_with_retry(
+                        gen_request,
+                    )
+                    task_ids.append(submit_response.task_id)
 
                     # Poll for completion
-                    response = await self.wan26_adapter.poll_task_status(response.task_id)
+                    status_response = await self.wan26_adapter.poll_task_status(
+                        submit_response.task_id,
+                    )
 
-                    if response.status == "succeeded" and response.video_url:
+                    if status_response.status == "succeeded" and status_response.video_url:
                         # Download video
-                        temp_video_path = await self.downloader.download_video(response.video_url)
+                        temp_video_path = await self.downloader.download_video(
+                            status_response.video_url,
+                        )
 
                         # Split video/audio
                         video_path = self.asset_storage.get_video_storage_path(job.job_id, shot_id)
                         audio_path = self.asset_storage.get_audio_storage_path(job.job_id, shot_id)
 
                         try:
-                            split_result = self.ffmpeg_splitter.split_video_audio(
+                            split_result = await asyncio.to_thread(
+                                self.ffmpeg_splitter.split_video_audio,
                                 temp_video_path,
                                 video_path,
                                 audio_path,
@@ -599,8 +608,8 @@ class JobManager:
                         asset = {
                             "shot_id": shot_id,
                             "seed": shot_request["params"]["seed"],
-                            "model_task_id": response.task_id,
-                            "raw_video_url": response.video_url,
+                            "model_task_id": status_response.task_id,
+                            "raw_video_url": status_response.video_url,
                             "video_url": self.asset_storage.get_video_url(job.job_id, shot_id),
                             "audio_url": audio_url,
                             "video_path": video_path,
@@ -616,8 +625,8 @@ class JobManager:
                         logger.error(
                             "shot_generation_failed",
                             shot_id=shot_id,
-                            task_id=response.task_id,
-                            error=response.error,
+                            task_id=status_response.task_id,
+                            error=status_response.error,
                         )
 
                 except Exception as e:
@@ -629,9 +638,15 @@ class JobManager:
                     # Continue with next shot
                     continue
 
-            # Add candidates to results
-            if shot_candidates:
-                shot_assets.extend(shot_candidates)
+            return shot_candidates, task_ids
+
+        tasks = [asyncio.create_task(_generate_shot_candidates(req)) for req in shot_requests]
+        results = await asyncio.gather(*tasks) if tasks else []
+
+        for candidates, task_ids in results:
+            if candidates:
+                shot_assets.extend(candidates)
+            external_task_ids.extend(task_ids)
 
         if external_task_ids:
             job.external_task_ids = external_task_ids
@@ -882,15 +897,17 @@ class JobManager:
         Returns:
             List of final shot asset dicts
         """
-        final_shot_assets = []
+        final_shot_assets: List[Dict[str, Any]] = []
         shot_requests = job.shot_requests
 
-        for shot_request in shot_requests:
+        async def _generate_final_shot(
+            shot_request: Dict[str, Any],
+        ) -> Optional[Dict[str, Any]]:
             shot_id = shot_request["shot_id"]
 
             # Skip if shot not in selected seeds
             if shot_id not in selected_seeds:
-                continue
+                return None
 
             selected_seed = selected_seeds[shot_id]
 
@@ -911,14 +928,20 @@ class JobManager:
                     watermark=shot_request["params"]["watermark"],
                 )
 
-                response = await self.wan26_adapter.submit_shot_request_with_retry(gen_request)
+                submit_response = await self.wan26_adapter.submit_shot_request_with_retry(
+                    gen_request,
+                )
 
                 # Poll for completion
-                response = await self.wan26_adapter.poll_task_status(response.task_id)
+                status_response = await self.wan26_adapter.poll_task_status(
+                    submit_response.task_id,
+                )
 
-                if response.status == "succeeded" and response.video_url:
+                if status_response.status == "succeeded" and status_response.video_url:
                     # Download video
-                    temp_video_path = await self.downloader.download_video(response.video_url)
+                    temp_video_path = await self.downloader.download_video(
+                        status_response.video_url,
+                    )
 
                     # Split video/audio
                     video_path = self.asset_storage.get_video_storage_path(
@@ -931,7 +954,8 @@ class JobManager:
                     )
 
                     try:
-                        split_result = self.ffmpeg_splitter.split_video_audio(
+                        split_result = await asyncio.to_thread(
+                            self.ffmpeg_splitter.split_video_audio,
                             temp_video_path,
                             video_path,
                             audio_path,
@@ -962,8 +986,8 @@ class JobManager:
                     asset = {
                         "shot_id": shot_id,
                         "seed": selected_seed,
-                        "model_task_id": response.task_id,
-                        "raw_video_url": response.video_url,
+                        "model_task_id": status_response.task_id,
+                        "raw_video_url": status_response.video_url,
                         "video_url": self.asset_storage.get_video_url(
                             job.job_id,
                             f"{shot_id}_final",
@@ -985,13 +1009,14 @@ class JobManager:
                         resolution=target_resolution,
                     )
 
+                    return asset
                 else:
                     logger.error(
                         "final_shot_generation_failed",
                         job_id=job.job_id,
                         shot_id=shot_id,
-                        task_id=response.task_id,
-                        error=response.error,
+                        task_id=status_response.task_id,
+                        error=status_response.error,
                     )
 
             except Exception as e:
@@ -1002,7 +1027,20 @@ class JobManager:
                     error=str(e),
                 )
                 # Continue with next shot
-                continue
+                return None
+
+            return None
+
+        tasks = [
+            asyncio.create_task(_generate_final_shot(req))
+            for req in shot_requests
+            if req.get("shot_id") in selected_seeds
+        ]
+        results = await asyncio.gather(*tasks) if tasks else []
+
+        for asset in results:
+            if asset:
+                final_shot_assets.append(asset)
 
         return final_shot_assets
 

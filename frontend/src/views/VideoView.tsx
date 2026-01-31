@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Play, Pause, SkipBack, SkipForward, Volume2, Settings, Download, Share2, MessageSquare } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Volume2, Download, MessageSquare } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { VideoTrackItem, AudioTrackItem } from '../components/TimelineTracks';
 
@@ -10,6 +10,11 @@ export const VideoView = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const pendingSeekTimeRef = useRef<number | null>(null);
+  const [volume, setVolume] = useState(0.8);
+  const [isVolumeOpen, setIsVolumeOpen] = useState(false);
+  const [isDownloadOpen, setIsDownloadOpen] = useState(false);
+  const volumeWrapRef = useRef<HTMLDivElement>(null);
+  const downloadWrapRef = useRef<HTMLDivElement>(null);
 
   // Use the first generated video if available, or fallback to mock
   const currentVideoUrl = shotAssets && shotAssets.length > 0 ? shotAssets[activeShotIndex].video_url : "";
@@ -132,6 +137,29 @@ export const VideoView = () => {
         }
     }
   }, [isPlaying, currentVideoUrl, currentAudioUrl]); // React to play state change and source changes
+
+  useEffect(() => {
+    if (videoRef.current) {
+        videoRef.current.volume = volume;
+    }
+    if (audioRef.current) {
+        audioRef.current.volume = volume;
+    }
+  }, [volume, currentVideoUrl, currentAudioUrl]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+        const target = event.target as Node;
+        if (volumeWrapRef.current && !volumeWrapRef.current.contains(target)) {
+            setIsVolumeOpen(false);
+        }
+        if (downloadWrapRef.current && !downloadWrapRef.current.contains(target)) {
+            setIsDownloadOpen(false);
+        }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const handleVideoDurationChange = (e: React.SyntheticEvent<HTMLVideoElement>) => {
       const vid = e.currentTarget;
@@ -460,8 +488,74 @@ export const VideoView = () => {
                         <div className="text-xs font-mono text-zinc-400 ml-2">Shot {activeShotIndex + 1} / {shotAssets?.length || 1}</div>
                     </div>
                     <div className="flex items-center gap-4">
-                         <button className="text-zinc-400 hover:text-white"><Volume2 size={20} /></button>
-                         <button className="text-zinc-400 hover:text-white"><Settings size={20} /></button>
+                         <div className="relative" ref={volumeWrapRef}>
+                            <button
+                                className="text-zinc-400 hover:text-white"
+                                onClick={() => {
+                                    setIsVolumeOpen((prev) => !prev);
+                                    setIsDownloadOpen(false);
+                                }}
+                                aria-label="Volume"
+                            >
+                                <Volume2 size={20} />
+                            </button>
+                            {isVolumeOpen && (
+                                <div className="absolute right-0 bottom-8 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 shadow-lg">
+                                    <div className="flex items-center gap-2 text-xs text-zinc-300">
+                                        <span>音量</span>
+                                        <input
+                                            type="range"
+                                            min="0"
+                                            max="100"
+                                            value={Math.round(volume * 100)}
+                                            onChange={(e) => setVolume(Math.max(0, Math.min(1, Number(e.target.value) / 100)))}
+                                            className="w-28 h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-primary-500"
+                                        />
+                                        <span className="w-8 text-right">{Math.round(volume * 100)}%</span>
+                                    </div>
+                                </div>
+                            )}
+                         </div>
+                         <div className="relative" ref={downloadWrapRef}>
+                            <button
+                                className="text-zinc-400 hover:text-white"
+                                onClick={() => {
+                                    setIsDownloadOpen((prev) => !prev);
+                                    setIsVolumeOpen(false);
+                                }}
+                                aria-label="Download"
+                            >
+                                <Download size={20} />
+                            </button>
+                            {isDownloadOpen && (
+                                <div className="absolute right-0 bottom-8 bg-zinc-900 border border-zinc-700 rounded-lg p-2 shadow-lg min-w-[140px]">
+                                    <a
+                                        className={`block px-3 py-2 rounded text-xs transition-colors ${
+                                            currentVideoUrl ? "text-zinc-200 hover:bg-zinc-800" : "text-zinc-500 cursor-not-allowed"
+                                        }`}
+                                        href={currentVideoUrl || undefined}
+                                        download
+                                        onClick={(e) => {
+                                            if (!currentVideoUrl) e.preventDefault();
+                                        }}
+                                    >
+                                        下载视频
+                                    </a>
+                                    <a
+                                        className={`block px-3 py-2 rounded text-xs transition-colors ${
+                                            currentAudioUrl ? "text-zinc-200 hover:bg-zinc-800" : "text-zinc-500 cursor-not-allowed"
+                                        }`}
+                                        href={currentAudioUrl || undefined}
+                                        download
+                                        onClick={(e) => {
+                                            if (!currentAudioUrl) e.preventDefault();
+                                        }}
+                                    >
+                                        下载音频
+                                    </a>
+                                </div>
+                            )}
+                         </div>
                     </div>
                 </div>
             </div>
