@@ -62,9 +62,21 @@ export interface ReviseResponse {
 
 
 export const api = {
+  // Submit planning job (script + shot plan only)
+  planVideo: async (params: GenerationRequest): Promise<GenerationResponse> => {
+    const response = await apiClient.post<GenerationResponse>('/plan', params);
+    return response.data;
+  },
+
   // Submit generation job
   generateVideo: async (params: GenerationRequest): Promise<GenerationResponse> => {
     const response = await apiClient.post<GenerationResponse>('/generate', params);
+    return response.data;
+  },
+
+  // Trigger render for existing job
+  renderVideo: async (jobId: string): Promise<GenerationResponse> => {
+    const response = await apiClient.post<GenerationResponse>(`/jobs/${jobId}/render`);
     return response.data;
   },
 

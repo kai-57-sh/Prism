@@ -256,6 +256,262 @@ class JobManager:
             # Decrement concurrent job counter
             self.rate_limiter.decrement_concurrent_jobs(client_ip)
 
+    async def execute_planning_workflow(
+        self,
+        db: Session,
+        user_input: str,
+        quality_mode: str,
+        client_ip: str,
+        resolution: str = "1280x720",
+    ) -> JobModel:
+        """
+        Execute planning workflow (script + shot plan only, no video generation).
+
+        Args:
+            db: Database session
+            user_input: Raw user input
+            quality_mode: Quality mode (fast, balanced, high)
+            client_ip: Client IP address for rate limiting
+            resolution: Video resolution
+
+        Returns:
+            JobModel with planning results (shot_plan/shot_requests)
+        """
+        # Check rate limits
+        rate_limit_result = self.rate_limiter.check_rate_limit(client_ip)
+        if not rate_limit_result["allowed"]:
+            raise ValueError(f"Rate limit exceeded. Try again at {rate_limit_result['reset_at']}")
+
+        concurrent_result = self.rate_limiter.check_concurrent_jobs(client_ip)
+        if not concurrent_result["allowed"]:
+            raise ValueError(
+                f"Concurrent job limit reached. Current: {concurrent_result['current']}, "
+                f"Max: {concurrent_result['max']}"
+            )
+
+        # Step 1: Process input (redaction, language detection)
+        logger.info("planning_step_1", step="input_processing")
+        processed = self.input_processor.process_input(
+            user_input,
+            auto_translate=False,  # TODO: Use AUTO_TRANSLATE constant
+            align_bilingual=True,
+            align_target_language="en-US",
+        )
+
+        # Step 2: Parse IR
+        logger.info("planning_step_2", step="ir_parsing")
+        ir_input = processed.get("aligned_text") or processed["redacted_text"]
+        ir = self.llm_orchestrator.parse_ir(
+            ir_input,
+            quality_mode,
+        )
+        ir_dict = ir.dict()
+
+        # Step 3: Match template
+        logger.info("planning_step_3", step="template_matching")
+        template_match = self.template_router.match_template(
+            ir_dict,
+            db,
+        )
+
+        if not template_match:
+            logger.warning("template_match_failed", trigger_clarification=True)
+            raise ValueError("No matching template found. Please provide more details.")
+
+        template = template_match.template
+
+        # Log template hit
+        log_template_hit(
+            template_id=template["template_id"],
+            confidence=template_match.confidence,
+            confidence_components=template_match.confidence_components,
+        )
+
+        # Step 4: Instantiate template
+        logger.info("planning_step_4", step="template_instantiation")
+        shot_plan = self.llm_orchestrator.instantiate_template(
+            ir,
+            template,
+        )
+        shot_plan_dict = shot_plan.dict()
+        shot_plan_dict = self._normalize_shot_plan(shot_plan_dict, template)
+
+        # Step 5: Validate parameters
+        logger.info("planning_step_5", step="validation")
+        is_valid, suggestions = self.validator.validate_parameters(
+            ir_dict,
+            shot_plan_dict,
+            quality_mode,
+        )
+
+        if not is_valid:
+            logger.warning("planning_validation_failed", suggestions=suggestions)
+            raise ValueError(f"Validation failed: {suggestions}")
+
+        # Step 6: Compile prompts per shot
+        logger.info("planning_step_6", step="prompt_compilation")
+        shot_requests = []
+
+        for shot in shot_plan_dict["shots"]:
+            compiled = self.prompt_compiler.compile_shot_prompt(
+                shot=shot,
+                shot_plan=shot_plan_dict,
+                ir=ir_dict,
+                negative_prompt_base=template["negative_prompt_base"],
+                prompt_extend=False,
+            )
+
+            shot_request = {
+                "shot_id": shot["shot_id"],
+                "compiled_prompt": compiled.compiled_prompt,
+                "compiled_negative_prompt": compiled.compiled_negative_prompt,
+                "params": compiled.params,
+            }
+            shot_requests.append(shot_request)
+
+        # Step 7: Create job record
+        logger.info("planning_step_7", step="job_creation")
+        job = JobDB.create_job(
+            db=db,
+            user_input_redacted=processed["redacted_text"],
+            user_input_hash=processed["input_hash"],
+            pii_flags=processed["pii_flags"],
+            template_id=template["template_id"],
+            template_version=template["version"],
+            quality_mode=quality_mode,
+            ir=ir_dict,
+            shot_plan=shot_plan_dict,
+            shot_requests=shot_requests,
+            external_task_ids=[],
+            total_duration_s=shot_plan_dict["duration_s"],
+            resolution=resolution,
+        )
+
+        # Step 8: Transition through planning states
+        transition_state(db, job.job_id, "SUBMITTED", "planning_submitted")
+        transition_state(db, job.job_id, "RUNNING", "planning_started")
+
+        try:
+            # Step 9: Write metadata (no assets yet)
+            logger.info("planning_step_9", step="write_metadata")
+            self._write_job_metadata(job, [])
+
+            # Step 10: Mark planning complete
+            transition_state(db, job.job_id, "SUCCEEDED", "planning_complete")
+
+            return job
+        except Exception as e:
+            logger.error("planning_failed", job_id=job.job_id, error=str(e))
+            transition_state(db, job.job_id, "FAILED", "planning_failed")
+
+            error_classification = self._classify_error(e)
+            log_failure_classification(
+                error_code=error_classification["code"],
+                classification=error_classification["classification"],
+                retryable=error_classification["retryable"],
+                job_id=job.job_id,
+            )
+            JobDB.update_job_error(
+                db=db,
+                job_id=job.job_id,
+                error_details=error_classification,
+            )
+            raise
+
+    async def execute_generation_from_job(
+        self,
+        db: Session,
+        job_id: str,
+        client_ip: str,
+    ) -> JobModel:
+        """
+        Execute video generation workflow for an existing planned job.
+
+        Args:
+            db: Database session
+            job_id: Job identifier
+            client_ip: Client IP address for rate limiting
+
+        Returns:
+            JobModel with final status
+        """
+        job = JobDB.get_job(db, job_id)
+        if not job:
+            raise ValueError(f"Job {job_id} not found")
+
+        if job.state == "RUNNING":
+            raise ValueError("Job is already running")
+        if job.state == "FAILED":
+            raise ValueError("Job is in FAILED state")
+        if not job.shot_requests:
+            raise ValueError("Job is missing shot requests")
+        if job.shot_assets:
+            raise ValueError("Job already has generated assets")
+
+        rate_limit_result = self.rate_limiter.check_rate_limit(client_ip)
+        if not rate_limit_result["allowed"]:
+            raise ValueError(f"Rate limit exceeded. Try again at {rate_limit_result['reset_at']}")
+
+        concurrent_result = self.rate_limiter.check_concurrent_jobs(client_ip)
+        if not concurrent_result["allowed"]:
+            raise ValueError(
+                f"Concurrent job limit reached. Current: {concurrent_result['current']}, "
+                f"Max: {concurrent_result['max']}"
+            )
+
+        # Transition to RUNNING
+        if job.state == "CREATED":
+            transition_state(db, job.job_id, "SUBMITTED", "generation_submitted")
+            transition_state(db, job.job_id, "RUNNING", "generation_started")
+        else:
+            transition_state(db, job.job_id, "RUNNING", "generation_started")
+
+        # Increment concurrent job counter
+        self.rate_limiter.increment_concurrent_jobs(client_ip)
+
+        start_time = datetime.utcnow()
+
+        try:
+            shot_assets = await self._generate_shots(
+                db=db,
+                job=job,
+                shot_requests=job.shot_requests,
+            )
+
+            JobDB.update_job_assets(db, job.job_id, shot_assets)
+            self._write_job_metadata(job, shot_assets)
+
+            transition_state(db, job.job_id, "SUCCEEDED", "generation_complete")
+
+            duration_s = (datetime.utcnow() - start_time).total_seconds()
+            log_generation_duration(
+                job_id=job.job_id,
+                duration_s=duration_s,
+                shot_count=len(job.shot_requests),
+                quality_mode=job.quality_mode,
+            )
+
+            return job
+        except Exception as e:
+            logger.error("workflow_failed", job_id=job.job_id, error=str(e))
+            transition_state(db, job.job_id, "FAILED", "generation_failed")
+
+            error_classification = self._classify_error(e)
+            log_failure_classification(
+                error_code=error_classification["code"],
+                classification=error_classification["classification"],
+                retryable=error_classification["retryable"],
+                job_id=job.job_id,
+            )
+            JobDB.update_job_error(
+                db=db,
+                job_id=job.job_id,
+                error_details=error_classification,
+            )
+            raise
+        finally:
+            self.rate_limiter.decrement_concurrent_jobs(client_ip)
+
     async def _generate_shots(
         self,
         db: Session,

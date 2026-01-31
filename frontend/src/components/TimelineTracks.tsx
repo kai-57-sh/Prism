@@ -137,15 +137,19 @@ async function generateThumbnails(videoUrl: string, duration: number): Promise<s
 }
 
 interface AudioTrackItemProps {
-    videoUrl: string;
+    audioUrl?: string;
 }
 
-export const AudioTrackItem: React.FC<AudioTrackItemProps> = React.memo(({ videoUrl }) => {
+export const AudioTrackItem: React.FC<AudioTrackItemProps> = React.memo(({ audioUrl }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [error, setError] = useState(false);
 
     useEffect(() => {
-        if (!videoUrl) return;
+        setError(false);
+        if (!audioUrl) {
+            setError(true);
+            return;
+        }
 
         let isMounted = true;
 
@@ -155,7 +159,7 @@ export const AudioTrackItem: React.FC<AudioTrackItemProps> = React.memo(({ video
                 const audioBuffer = await assetQueue.addWithRetry(async () => {
                     if (!isMounted) throw new Error("Component unmounted");
                     // Use clean URL
-                    return fetchAudioData(videoUrl);
+                    return fetchAudioData(audioUrl);
                 });
                 
                 if (isMounted && audioBuffer) {
@@ -166,7 +170,7 @@ export const AudioTrackItem: React.FC<AudioTrackItemProps> = React.memo(({ video
                  // Silently handle abort errors
                  if (err instanceof Error && (err.name === 'AbortError' || err.message.includes('Aborted'))) return;
                  
-                 console.error("Audio waveform generation failed:", videoUrl, err);
+                 console.error("Audio waveform generation failed:", audioUrl, err);
                  if (isMounted) setError(true);
              }
         };
@@ -176,7 +180,7 @@ export const AudioTrackItem: React.FC<AudioTrackItemProps> = React.memo(({ video
         return () => {
             isMounted = false;
         };
-    }, [videoUrl]);
+    }, [audioUrl]);
 
     const drawWaveform = (buffer: AudioBuffer, canvas: HTMLCanvasElement | null) => {
         if (!canvas) return;

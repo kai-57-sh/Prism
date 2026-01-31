@@ -46,6 +46,31 @@ class Wan26Adapter:
         """Initialize wan2.6 adapter"""
         self.api_key = settings.dashscope_api_key
 
+    def _format_task_error(
+        self,
+        task_status: str,
+        rsp: Any,
+        output_payload: Optional[Dict[str, Any]],
+    ) -> str:
+        parts: List[str] = []
+        if task_status:
+            parts.append(f"task_status={task_status}")
+
+        code = getattr(rsp, "code", None)
+        message = getattr(rsp, "message", None)
+        if code:
+            parts.append(f"code={code}")
+        if message:
+            parts.append(f"message={message}")
+
+        if output_payload:
+            for key in ("code", "message", "error", "error_code", "error_msg", "reason", "failed_reason"):
+                value = output_payload.get(key)
+                if value:
+                    parts.append(f"{key}={value}")
+
+        return "; ".join(parts) if parts else "Video synthesis failed without error details"
+
     async def submit_shot_request(
         self,
         request: ShotGenerationRequest,
@@ -146,10 +171,63 @@ class Wan26Adapter:
             rsp = VideoSynthesis.wait(task=task_id, api_key=self.api_key)
 
             if rsp.status_code == HTTPStatus.OK:
-                video_url = rsp.output.video_url
+                output_payload: Dict[str, Any] = (
+                    rsp.output if isinstance(rsp.output, dict) else {}
+                )
+                raw_task_status = None
+                raw_video_url = None
+                if rsp.output is not None:
+                    if isinstance(rsp.output, dict):
+                        raw_task_status = rsp.output.get("task_status")
+                        raw_video_url = rsp.output.get("video_url")
+                    else:
+                        raw_task_status = getattr(rsp.output, "task_status", None)
+                        raw_video_url = getattr(rsp.output, "video_url", None)
+
+                task_status = raw_task_status if isinstance(raw_task_status, str) else ""
+                video_url = raw_video_url if isinstance(raw_video_url, str) else ""
+                normalized_status = task_status.strip().lower()
+
+                if normalized_status and normalized_status not in {
+                    "succeeded",
+                    "success",
+                    "completed",
+                    "done",
+                    "finished",
+                }:
+                    error_msg = self._format_task_error(task_status, rsp, output_payload)
+                    logger.error(
+                        "task_failed",
+                        task_id=task_id,
+                        task_status=task_status,
+                        error=error_msg,
+                    )
+                    return ShotGenerationResponse(
+                        task_id=task_id,
+                        status="failed",
+                        error=error_msg,
+                    )
+
+                if not video_url:
+                    error_msg = self._format_task_error(task_status, rsp, output_payload)
+                    if not error_msg:
+                        error_msg = "Video synthesis completed but no video_url returned"
+                    logger.error(
+                        "task_failed",
+                        task_id=task_id,
+                        task_status=task_status or "unknown",
+                        error=error_msg,
+                    )
+                    return ShotGenerationResponse(
+                        task_id=task_id,
+                        status="failed",
+                        error=error_msg,
+                    )
+
                 logger.info(
                     "task_completed",
                     task_id=task_id,
+                    task_status=task_status or "unknown",
                     video_url=video_url,
                 )
 

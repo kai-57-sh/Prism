@@ -3,6 +3,9 @@ Template Router - FAISS-based semantic template matching
 """
 
 from typing import List, Dict, Any, Optional, Tuple, Set
+from pathlib import Path
+import hashlib
+import json
 import re
 import numpy as np
 from langchain_community.vectorstores import FAISS
@@ -22,6 +25,99 @@ class TemplateMatch(BaseModel):
     confidence: float
     confidence_components: Dict[str, float]
     template: Dict[str, Any]
+
+
+class _CachedEmbeddings:
+    """Embedding wrapper that caches template embeddings on disk."""
+
+    def __init__(self, base_embeddings: Any, cache_path: Path, model_name: str):
+        self._base_embeddings = base_embeddings
+        self._cache_path = cache_path
+        self._model_name = model_name
+        self._cache = self._load_cache()
+
+    def _hash_text(self, text: str) -> str:
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    def _load_cache(self) -> Dict[str, Any]:
+        if not self._cache_path.exists():
+            return {"model": self._model_name, "items": {}}
+
+        try:
+            with self._cache_path.open("r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except Exception as exc:
+            logger.warning("embedding_cache_load_failed", error=str(exc))
+            return {"model": self._model_name, "items": {}}
+
+        if not isinstance(data, dict):
+            return {"model": self._model_name, "items": {}}
+
+        if data.get("model") != self._model_name:
+            return {"model": self._model_name, "items": {}}
+
+        items = data.get("items")
+        if not isinstance(items, dict):
+            items = {}
+
+        return {"model": self._model_name, "items": items}
+
+    def _save_cache(self) -> None:
+        self._cache_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = Path(f"{self._cache_path}.tmp")
+        with tmp_path.open("w", encoding="utf-8") as handle:
+            json.dump(self._cache, handle)
+        tmp_path.replace(self._cache_path)
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        if not texts:
+            return []
+
+        items = self._cache.get("items", {})
+        embeddings: List[Optional[List[float]]] = [None] * len(texts)
+        missing_texts: List[str] = []
+        missing_indices: List[int] = []
+        missing_hashes: List[str] = []
+
+        for idx, text in enumerate(texts):
+            text_hash = self._hash_text(text)
+            cached = items.get(text_hash)
+            if isinstance(cached, dict) and isinstance(cached.get("embedding"), list):
+                embeddings[idx] = cached["embedding"]
+            else:
+                missing_texts.append(text)
+                missing_indices.append(idx)
+                missing_hashes.append(text_hash)
+
+        if missing_texts:
+            new_embeddings = self._base_embeddings.embed_documents(missing_texts)
+            for idx, text_hash, text, embedding in zip(
+                missing_indices, missing_hashes, missing_texts, new_embeddings
+            ):
+                embeddings[idx] = embedding
+                items[text_hash] = {"text": text, "embedding": embedding}
+
+            self._cache = {"model": self._model_name, "items": items}
+            self._save_cache()
+
+        if any(embedding is None for embedding in embeddings):
+            fallback_texts = [
+                text for text, embedding in zip(texts, embeddings) if embedding is None
+            ]
+            fallback_embeddings = self._base_embeddings.embed_documents(fallback_texts)
+            fallback_iter = iter(fallback_embeddings)
+            for idx, embedding in enumerate(embeddings):
+                if embedding is None:
+                    embeddings[idx] = next(fallback_iter)
+
+        if any(embedding is None for embedding in embeddings):
+            logger.warning("embedding_cache_incomplete")
+            return self._base_embeddings.embed_documents(texts)
+
+        return [embedding for embedding in embeddings]
+
+    def embed_query(self, text: str) -> List[float]:
+        return self._base_embeddings.embed_query(text)
 
 
 class TemplateRouter:
@@ -75,9 +171,14 @@ class TemplateRouter:
         # Build FAISS index
         if texts and self.embeddings is not None:
             try:
+                cached_embeddings = _CachedEmbeddings(
+                    self.embeddings,
+                    self._embedding_cache_path(),
+                    settings.embedding_model,
+                )
                 self.faiss_index = FAISS.from_texts(
                     texts=texts,
-                    embedding=self.embeddings,
+                    embedding=cached_embeddings,
                     metadatas=metadata,
                     normalize_L2=True,
                 )
@@ -85,6 +186,10 @@ class TemplateRouter:
                 logger.warning("embedding_index_build_failed", error=str(exc))
                 # Allow metadata-only builds in unit tests without embeddings
                 self.faiss_index = None
+
+    def _embedding_cache_path(self) -> Path:
+        backend_root = Path(__file__).resolve().parents[2]
+        return backend_root / "data" / "template_embeddings.json"
 
     def _normalize_tag(self, value: str) -> str:
         """Normalize tags for comparisons."""

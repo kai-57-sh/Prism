@@ -23,16 +23,20 @@ export const Sidebar = () => {
               
               if (status.status === 'SUCCEEDED') {
                   clearInterval(interval);
-                  setAppState('EDITING');
-                  addMessage('ai', '视频脚本和分镜生成完毕！请查看右侧工作区。');
+                  if (status.assets && status.assets.length > 0) {
+                      setShotAssets(status.assets);
+                      setAppState('COMPLETED');
+                      addMessage('ai', '视频生成完成！请在右侧查看。');
+                  } else {
+                      setAppState('EDITING');
+                      addMessage('ai', '视频脚本和分镜生成完毕！请查看右侧工作区。');
+                  }
                   if (status.script) setScript(status.script);
                   
                   // Handle shot_plan structure
                   if (status.shot_plan && status.shot_plan.shots) {
                       setShotPlan(status.shot_plan.shots);
                   }
-                  
-                  if (status.assets) setShotAssets(status.assets);
               } else if (status.status === 'FAILED') {
                   clearInterval(interval);
                   setAppState('IDLE'); // Or error state
@@ -63,14 +67,14 @@ export const Sidebar = () => {
     if (appState === 'IDLE' || appState === 'COMPLETED') {
       setAppState('THINKING');
       try {
-          const res = await api.generateVideo({
+          const res = await api.planVideo({
               user_prompt: userInput,
               quality_mode: 'balanced',
               resolution: '1280x720'
           });
           
           setCurrentJobId(res.job_id);
-          addMessage('ai', '好的，任务已提交，正在为您生成脚本和分镜...');
+          addMessage('ai', '好的，正在为您生成脚本和分镜...');
           
           // Start polling
           pollJobStatus(res.job_id);

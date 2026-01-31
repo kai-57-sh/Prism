@@ -193,13 +193,15 @@ async def shutdown_event():
 
 
 # Import routers
-from src.api.routes import generation, jobs, finalize, revise
+from src.api.routes import generation, jobs, finalize, revise, plan, render
 
 # Register routers
 app.include_router(generation.router, prefix="/v1/t2v", tags=["generation"])
+app.include_router(plan.router, prefix="/v1/t2v", tags=["planning"])
 app.include_router(jobs.router, prefix="/v1/t2v", tags=["jobs"])
 app.include_router(finalize.router, prefix="/v1/t2v", tags=["finalize"])
 app.include_router(revise.router, prefix="/v1/t2v", tags=["revise"])
+app.include_router(render.router, prefix="/v1/t2v", tags=["render"])
 
 
 # Root endpoint

@@ -8,10 +8,12 @@ export const VideoView = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeShotIndex, setActiveShotIndex] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
   const pendingSeekTimeRef = useRef<number | null>(null);
 
   // Use the first generated video if available, or fallback to mock
   const currentVideoUrl = shotAssets && shotAssets.length > 0 ? shotAssets[activeShotIndex].video_url : "";
+  const currentAudioUrl = shotAssets && shotAssets.length > 0 ? shotAssets[activeShotIndex].audio_url : "";
   const isVideo = shotAssets && shotAssets.length > 0;
 
   // Placeholder images for filmstrip effect - using colored placeholders to avoid CORB
@@ -28,6 +30,10 @@ export const VideoView = () => {
       } else {
           setIsPlaying(false);
           setActiveShotIndex(0); // Loop back to start or stop
+      }
+      if (audioRef.current) {
+          audioRef.current.pause();
+          audioRef.current.currentTime = 0;
       }
   };
 
@@ -49,6 +55,15 @@ export const VideoView = () => {
       setRealVideoDuration(plannedShotDuration);
   }, [activeShotIndex, plannedShotDuration]);
 
+  useEffect(() => {
+      if (audioRef.current) {
+          audioRef.current.currentTime = 0;
+          if (isPlaying && currentAudioUrl) {
+              audioRef.current.play().catch(e => console.error("Audio play error:", e));
+          }
+      }
+  }, [activeShotIndex, currentAudioUrl, isPlaying]);
+
   // Sync global time with video play
   useEffect(() => {
     let interval: any;
@@ -62,6 +77,13 @@ export const VideoView = () => {
                const currentTime = videoRef.current.currentTime;
                setLocalTime(currentTime); // Update local time state
                const newGlobal = currentShotStart + currentTime;
+
+               if (audioRef.current && currentAudioUrl) {
+                   const audioDelta = Math.abs(audioRef.current.currentTime - currentTime);
+                   if (audioDelta > 0.1) {
+                       audioRef.current.currentTime = currentTime;
+                   }
+               }
                
                // Check if we reached the end of the ACTUAL video or the PLANNED duration
                // Usually onEnded handles the actual video end.
@@ -80,7 +102,7 @@ export const VideoView = () => {
         }
     }
     return () => clearInterval(interval);
-  }, [isPlaying, activeShotIndex, shotAssets, totalDuration]);
+  }, [isPlaying, activeShotIndex, shotAssets, totalDuration, currentAudioUrl]);
 
   // Update local time when active shot changes or global time is set manually
   useEffect(() => {
@@ -100,7 +122,16 @@ export const VideoView = () => {
             videoRef.current.pause();
         }
     }
-  }, [isPlaying, currentVideoUrl]); // React to play state change and video source change
+    if (audioRef.current) {
+        if (!currentAudioUrl) {
+            audioRef.current.pause();
+        } else if (isPlaying) {
+            audioRef.current.play().catch(e => console.error("Audio play error:", e));
+        } else {
+            audioRef.current.pause();
+        }
+    }
+  }, [isPlaying, currentVideoUrl, currentAudioUrl]); // React to play state change and source changes
 
   const handleVideoDurationChange = (e: React.SyntheticEvent<HTMLVideoElement>) => {
       const vid = e.currentTarget;
@@ -123,6 +154,9 @@ export const VideoView = () => {
       
       if (videoRef.current) {
           videoRef.current.currentTime = seekTime;
+      }
+      if (audioRef.current && currentAudioUrl) {
+          audioRef.current.currentTime = seekTime;
       }
       
       // Update global time accordingly
@@ -173,6 +207,9 @@ export const VideoView = () => {
                       pendingSeekTimeRef.current = localSeek;
                   }
               }
+              if (audioRef.current && currentAudioUrl) {
+                  audioRef.current.currentTime = localSeek;
+              }
               return;
           }
           accumulated += duration;
@@ -187,6 +224,9 @@ export const VideoView = () => {
            } else {
                pendingSeekTimeRef.current = lastShotDuration;
            }
+      }
+      if (audioRef.current && currentAudioUrl) {
+           audioRef.current.currentTime = shotAssets[shotAssets.length - 1].duration_s || 5;
       }
   };
 
@@ -292,6 +332,9 @@ export const VideoView = () => {
       // Apply pending seek if exists
       if (pendingSeekTimeRef.current !== null) {
           e.currentTarget.currentTime = pendingSeekTimeRef.current;
+          if (audioRef.current && currentAudioUrl) {
+              audioRef.current.currentTime = pendingSeekTimeRef.current;
+          }
           pendingSeekTimeRef.current = null;
       }
   };
@@ -357,6 +400,14 @@ export const VideoView = () => {
                                 <p>No Video Available</p>
                             </div>
                         )}
+
+                        {/* Hidden audio element for separate audio track playback */}
+                        <audio
+                            ref={audioRef}
+                            src={currentAudioUrl || undefined}
+                            preload="auto"
+                            className="hidden"
+                        />
                         
                         {!isPlaying && (
                             <div className="absolute inset-0 flex items-center justify-center bg-black/20">
@@ -501,7 +552,7 @@ export const VideoView = () => {
                                         className="border-r border-zinc-900/50 relative overflow-hidden h-full"
                                         style={{ width: `${((shot.duration_s || 5) / totalDuration) * 100}%` }}
                                     >
-                                        <AudioTrackItem videoUrl={shot.video_url} />
+                                        <AudioTrackItem audioUrl={shot.audio_url} />
                                     </div>
                                 ))
                              ) : (
@@ -529,4 +580,3 @@ const ImageIcon = ({ size }: { size: number }) => (
 function clsx(...args: any[]) {
     return args.filter(Boolean).join(' ');
 }
-

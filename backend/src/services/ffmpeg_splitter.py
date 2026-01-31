@@ -106,25 +106,43 @@ class FFmpegSplitter:
                     details=error_msg,
                 )
 
-            # Extract audio-only stream
-            logger.info(
-                "audio_extraction_start",
-                input_path=input_path,
-                output_path=audio_output_path,
-            )
-
-            audio_result = self._extract_audio(
-                input_path,
-                audio_output_path,
-            )
-
-            if audio_result.returncode != 0:
-                error_msg = audio_result.stderr.decode('utf-8', errors='ignore')
-                raise FFmpegError(
-                    f"Audio extraction failed: {error_msg}",
-                    self.ERROR_EXTRACTION_FAILED,
-                    details=error_msg,
+            # Extract audio-only stream (fallback to silent audio when missing)
+            if not self._has_audio_stream(input_path):
+                logger.warning(
+                    "audio_stream_missing",
+                    input_path=input_path,
                 )
+                duration = self._get_video_duration(video_output_path)
+                audio_result = self._generate_silent_audio(
+                    duration_s=duration,
+                    output_path=audio_output_path,
+                )
+                if audio_result.returncode != 0:
+                    error_msg = audio_result.stderr.decode('utf-8', errors='ignore')
+                    raise FFmpegError(
+                        f"Silent audio generation failed: {error_msg}",
+                        self.ERROR_AUDIO_STREAM_MISSING,
+                        details=error_msg,
+                    )
+            else:
+                logger.info(
+                    "audio_extraction_start",
+                    input_path=input_path,
+                    output_path=audio_output_path,
+                )
+
+                audio_result = self._extract_audio(
+                    input_path,
+                    audio_output_path,
+                )
+
+                if audio_result.returncode != 0:
+                    error_msg = audio_result.stderr.decode('utf-8', errors='ignore')
+                    raise FFmpegError(
+                        f"Audio extraction failed: {error_msg}",
+                        self.ERROR_EXTRACTION_FAILED,
+                        details=error_msg,
+                    )
 
             # Get file info
             video_duration = self._get_video_duration(video_output_path)
@@ -233,6 +251,65 @@ class FFmpegSplitter:
         )
 
         return result
+
+    def _generate_silent_audio(
+        self,
+        duration_s: float,
+        output_path: str,
+    ) -> subprocess.CompletedProcess:
+        """
+        Generate a silent audio track when input video has no audio stream.
+
+        Args:
+            duration_s: Duration in seconds
+            output_path: Output audio file path
+
+        Returns:
+            subprocess result
+        """
+        duration = max(float(duration_s or 0), 0.1)
+        cmd = [
+            self.ffmpeg_path,
+            "-f", "lavfi",
+            "-i", "anullsrc=r=48000:cl=stereo",
+            "-t", f"{duration:.3f}",
+            "-c:a", self.audio_codec,
+            "-b:a", self.audio_bitrate,
+            "-y",
+            output_path,
+        ]
+
+        return subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+    def _has_audio_stream(self, input_path: str) -> bool:
+        """
+        Check if input file has an audio stream using ffprobe.
+        """
+        cmd = [
+            "ffprobe",
+            "-v", "error",
+            "-select_streams", "a",
+            "-show_entries", "stream=index",
+            "-of", "csv=p=0",
+            input_path,
+        ]
+
+        try:
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            if result.returncode != 0:
+                return True  # Fallback: assume audio exists if probe fails
+            return bool(result.stdout.strip())
+        except Exception:
+            return True
 
     def _get_video_duration(self, video_path: str) -> float:
         """
