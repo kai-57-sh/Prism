@@ -191,39 +191,52 @@ Version: {template['version']}
 Shot Skeletons:
 {self._format_shot_skeletons(template['shot_skeletons'])}
 
-**Instructions (English only):**
+**Instructions (Chinese by default):**
 1. Use the optimized prompt as the primary creative brief for the storyboard.
 2. Fill in template placeholders with concrete values matching the optimized prompt.
 3. If any template detail conflicts with the optimized prompt, adapt the template to fit the optimized prompt.
-4. Visual style selection (no mixing across shots):
+4. Narrative coherence across shots:
+   - Shots 1-3 must be a single coherent story reflecting one theme.
+   - Keep characters, setting, time, and visual motifs consistent unless the optimized prompt requires a change.
+   - Ensure each shot logically progresses from the previous and aligns with the optimized prompt.
+5. Visual style selection (no mixing across shots):
    - If the optimized prompt explicitly specifies a style (vlog, 3D, documentary), follow it.
    - Otherwise choose the most suitable style category:
      a) Patient experience / lifestyle: vlog, real people, daily life, symptom checks; natural light, home/office.
      b) Medical mechanism / explainer: 3D animation, mechanism, metaphor, cute; high-end 3D render, clean studio look.
      c) Medical history / documentary: history, story, year, discovery, black-and-white; retro cinematic chiaroscuro, film grain.
-5. Scientific arc across shots (3-shot narrative):
+6. Scientific arc across shots (3-shot narrative):
    - Shot 1 (problem): observe a real-world health issue; no excessive pain.
    - Shot 2 (mechanism): explain why it happens scientifically or biologically.
    - Shot 3 (understanding): emphasize knowledge, understanding, or risk awareness only.
      Do NOT imply symptom improvement or health outcomes in Shot 3.
-6. Visual prompt constraints (Wan 2.2):
-   - Each shot's visual description must be in English and must include the exact keywords:
+7. Visual prompt constraints (Wan 2.2):
+   - Each shot's visual description should be primarily in Chinese.
+   - Must include the exact English keywords (keep them in English, do not translate):
      "cinematic lighting", "volumetric fog", "720p masterpiece", "high aesthetic score".
    - Use a resolution preference of either "720P" or "1080P" and store it in global_style.resolution_preference.
-7. Audio strategy:
+8. Audio strategy:
+   - Narration is required by default for every shot unless the user explicitly requests no narration.
    - Narration must be Chinese (colloquial but professional).
    - Strict character limits: Shot 1 <= 12 Chinese characters, Shot 2 <= 24, Shot 3 <= 16.
-8. Ensure visual descriptions are detailed and evocative.
-9. Match the emotion curve across shots.
-10. Respect the subtitle policy.
-11. Total duration should be approximately {ir.duration_preference_s}s.
+9. Ensure visual descriptions are detailed and evocative.
+10. Match the emotion curve across shots.
+11. Respect the subtitle policy.
+12. Total duration should be approximately {ir.duration_preference_s}s.
 
 {self.shot_plan_parser.get_format_instructions()}"""
 
         try:
             self._ensure_llm()
             messages = [
-                SystemMessage(content="You are a medical video director."),
+                SystemMessage(
+                    content=(
+                        "You are a medical video director. Default narration is required and must be "
+                        "Chinese unless the user explicitly requests no narration. Visual descriptions "
+                        "should be primarily in Chinese, but keep any required English keywords in English. "
+                        "Ensure the shots form a coherent, single-story arc aligned with the optimized prompt."
+                    )
+                ),
                 HumanMessage(content=prompt),
             ]
 

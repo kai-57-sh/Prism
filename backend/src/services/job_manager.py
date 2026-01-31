@@ -737,6 +737,19 @@ class JobManager:
                 skeleton_by_id[str(skeleton["shot_id"])] = skeleton
 
         normalized_shots: List[Dict[str, Any]] = []
+        def _extract_narration(source: Any) -> Optional[str]:
+            if isinstance(source, dict):
+                narration = source.get("narration")
+                if isinstance(narration, str):
+                    cleaned = narration.strip()
+                    if cleaned:
+                        return cleaned
+            if isinstance(source, str):
+                cleaned = source.strip()
+                if cleaned:
+                    return cleaned
+            return None
+
         for idx, shot in enumerate(shots):
             if not isinstance(shot, dict):
                 normalized_shots.append(shot)
@@ -750,21 +763,39 @@ class JobManager:
                     normalized["shot_id"] = skeleton_id
                     shot_id = skeleton_id
 
+            skeleton = None
+            if shot_id is not None:
+                skeleton = skeleton_by_id.get(str(shot_id))
+            if skeleton is None and idx < len(skeletons):
+                skeleton = skeletons[idx]
+
             duration = self._coerce_duration(normalized.get("duration_s"))
             if duration is None:
                 duration = self._coerce_duration(normalized.get("duration"))
             if duration is None:
                 duration = self._coerce_duration(normalized.get("length_s"))
             if duration is None:
-                skeleton = None
-                if shot_id is not None:
-                    skeleton = skeleton_by_id.get(str(shot_id))
-                if skeleton is None and idx < len(skeletons):
-                    skeleton = skeletons[idx]
                 if isinstance(skeleton, dict):
                     duration = self._coerce_duration(skeleton.get("duration_s"))
             if duration is not None:
                 normalized["duration_s"] = duration
+
+            narration = _extract_narration(normalized.get("audio"))
+            if not narration:
+                narration = _extract_narration(normalized.get("narration"))
+            if not narration:
+                narration = _extract_narration(normalized.get("audio_template"))
+            if not narration and isinstance(skeleton, dict):
+                narration = _extract_narration(skeleton.get("audio_template"))
+
+            if narration:
+                audio = normalized.get("audio")
+                if not isinstance(audio, dict):
+                    audio = {}
+                audio["narration"] = narration
+                normalized["audio"] = audio
+                if not _extract_narration(normalized.get("narration")):
+                    normalized["narration"] = narration
 
             normalized_shots.append(normalized)
 
