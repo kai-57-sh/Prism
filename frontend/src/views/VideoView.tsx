@@ -5,7 +5,17 @@ import { api } from '../api/client';
 import { VideoTrackItem, AudioTrackItem } from '../components/TimelineTracks';
 
 export const VideoView = () => {
-  const { shotAssets, updateShotDuration, shotPlan, currentJobId, setShotAssets, updateShotPlanShot } = useAppStore();
+  const {
+    appState,
+    setAppState,
+    addMessage,
+    shotAssets,
+    updateShotDuration,
+    shotPlan,
+    currentJobId,
+    setShotAssets,
+    updateShotPlanShot,
+  } = useAppStore();
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeShotIndex, setActiveShotIndex] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -24,6 +34,7 @@ export const VideoView = () => {
   const [regeneratingShotId, setRegeneratingShotId] = useState<number | null>(null);
   const [savingShots, setSavingShots] = useState<Record<number, boolean>>({});
   const shotCount = shotPlan?.length ?? 0;
+  const isRendering = appState === 'RENDERING';
 
   const baseActiveAsset = shotAssets && shotAssets.length > 0 ? shotAssets[activeShotIndex] : undefined;
   const activeShotId = baseActiveAsset?.shot_id ?? activeShotIndex + 1;
@@ -85,13 +96,37 @@ export const VideoView = () => {
   }, [activeShotIndex, plannedShotDuration]);
 
   useEffect(() => {
-      if (audioRef.current) {
-          audioRef.current.currentTime = 0;
+    if (audioRef.current) {
+        audioRef.current.currentTime = 0;
           if (isPlaying && currentAudioUrl) {
               audioRef.current.play().catch(e => console.error("Audio play error:", e));
           }
       }
   }, [activeShotIndex, currentAudioUrl, isPlaying]);
+
+  useEffect(() => {
+    if (appState !== 'RENDERING' || !currentJobId) return;
+    const interval = window.setInterval(async () => {
+        try {
+            const status = await api.getJobStatus(currentJobId);
+            if (status.status === 'SUCCEEDED') {
+                if (status.assets) setShotAssets(status.assets);
+                setAppState('COMPLETED');
+                clearInterval(interval);
+            } else if (status.status === 'FAILED') {
+                setAppState('EDITING');
+                addMessage('ai', `生成失败: ${status.error?.message || '未知错误'}`);
+                clearInterval(interval);
+            }
+        } catch (e) {
+            console.error('Render polling error', e);
+        }
+    }, 2000);
+
+    return () => {
+        clearInterval(interval);
+    };
+  }, [appState, currentJobId, setAppState, setShotAssets, addMessage]);
 
   useEffect(() => {
       if (!isComparing || !videoRef.current) return;
@@ -295,6 +330,7 @@ export const VideoView = () => {
   };
 
   const handleRegenerateShot = async (shotId: number) => {
+    if (isRendering) return;
     if (!currentJobId || !shotAssets || shotAssets.length === 0) return;
     const index = shotAssets.findIndex((asset) => asset.shot_id === shotId);
     if (index === -1) return;
@@ -558,6 +594,7 @@ export const VideoView = () => {
                 {shotPlan && shotPlan.length > 0 ? (
                     shotPlan.map((shot) => {
                         const edits = shotEdits[shot.shot_id] || { visual: '', narration: '' };
+                        const isGenerating = isRendering || regeneratingShotId === shot.shot_id;
                         return (
                             <div
                                 key={shot.shot_id}
@@ -577,7 +614,7 @@ export const VideoView = () => {
                                     <button
                                         className={clsx(
                                             "text-xs px-2 py-1 rounded-md border transition-colors flex items-center gap-1",
-                                            regeneratingShotId === shot.shot_id
+                                            isGenerating
                                                 ? "bg-green-100 text-green-700 border-green-200"
                                                 : "bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
                                         )}
@@ -585,9 +622,9 @@ export const VideoView = () => {
                                             e.stopPropagation();
                                             handleRegenerateShot(shot.shot_id);
                                         }}
-                                        disabled={regeneratingShotId === shot.shot_id}
+                                        disabled={isGenerating}
                                     >
-                                        {regeneratingShotId === shot.shot_id ? (
+                                        {isGenerating ? (
                                             <>
                                                 <Loader2 size={12} className="animate-spin" /> 生成中
                                             </>
@@ -638,8 +675,8 @@ export const VideoView = () => {
       <div className="flex-1 flex flex-col min-w-0">
         {/* Video Player Area */}
         <div className="flex-1 flex flex-col relative bg-black">
-            <div className="flex-1 flex items-center justify-center p-8">
-                <div className="aspect-video w-full max-w-4xl bg-zinc-800 rounded-lg shadow-2xl overflow-hidden relative group">
+            <div className="flex-1 flex items-center justify-center p-4">
+                <div className="w-full h-full bg-zinc-800 rounded-lg shadow-2xl overflow-hidden relative group">
                     {/* Video Content */}
                     <div className="absolute inset-0 flex items-center justify-center bg-zinc-900">
                         {isVideo ? (

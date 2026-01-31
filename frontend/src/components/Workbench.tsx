@@ -15,8 +15,9 @@ export const Workbench = () => {
       case 'THINKING':
       case 'GENERATING':
       case 'EDITING':
-      case 'RENDERING':
         return <ScriptWorkspace />;
+      case 'RENDERING':
+        return <VideoView />;
       case 'COMPLETED':
         return <VideoView />;
       default:
@@ -28,7 +29,7 @@ export const Workbench = () => {
     <div className="flex-1 bg-background h-screen overflow-hidden flex flex-col relative">
       <AnimatePresence mode="wait">
         <motion.div
-            key={appState === 'IDLE' ? 'idle' : appState === 'COMPLETED' ? 'completed' : 'workspace'}
+            key={appState === 'IDLE' ? 'idle' : appState === 'COMPLETED' || appState === 'RENDERING' ? 'video' : 'workspace'}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { api } from '../api/client';
 import { CheckCircle2, Circle, Loader2, Play, Image as ImageIcon, Upload, RefreshCw } from 'lucide-react';
@@ -13,11 +13,9 @@ export const ScriptWorkspace = () => {
     addMessage,
     shotPlan,
     currentJobId,
-    setShotAssets,
   } = useAppStore();
   const [activeStep, setActiveStep] = useState(0);
   const [uploadedScenes, setUploadedScenes] = useState<Record<number, boolean>>({});
-  const renderPollRef = useRef<number | null>(null);
 
   // Auto-progress logic based on appState
   useEffect(() => {
@@ -32,46 +30,6 @@ export const ScriptWorkspace = () => {
     }
   }, [appState]);
 
-  useEffect(() => {
-    return () => {
-      if (renderPollRef.current !== null) {
-        clearInterval(renderPollRef.current);
-        renderPollRef.current = null;
-      }
-    };
-  }, []);
-
-  const pollRenderStatus = (jobId: string) => {
-    if (renderPollRef.current !== null) {
-      clearInterval(renderPollRef.current);
-    }
-    renderPollRef.current = window.setInterval(async () => {
-      try {
-        const status = await api.getJobStatus(jobId);
-
-        if (status.status === 'SUCCEEDED') {
-          if (renderPollRef.current !== null) {
-            clearInterval(renderPollRef.current);
-            renderPollRef.current = null;
-          }
-          if (status.assets) setShotAssets(status.assets);
-          setAppState('COMPLETED');
-        } else if (status.status === 'FAILED') {
-          if (renderPollRef.current !== null) {
-            clearInterval(renderPollRef.current);
-            renderPollRef.current = null;
-          }
-          setAppState('EDITING');
-          addMessage('ai', `生成失败: ${status.error?.message || '未知错误'}`);
-        } else if (status.status === 'RUNNING') {
-          if (appState !== 'RENDERING') setAppState('RENDERING');
-        }
-      } catch (e) {
-        console.error('Render polling error', e);
-      }
-    }, 2000);
-  };
-
   const handleGenerateVideo = async () => {
     if (!currentJobId) {
       addMessage('ai', '当前没有可生成的视频任务。请先提交脚本生成。');
@@ -81,7 +39,6 @@ export const ScriptWorkspace = () => {
     addMessage('ai', '开始生成视频，请稍候...');
     try {
       await api.renderVideo(currentJobId);
-      pollRenderStatus(currentJobId);
     } catch (e: any) {
       setAppState('EDITING');
       addMessage('ai', `生成请求失败: ${e.message}`);
