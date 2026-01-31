@@ -18,7 +18,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Create static directories
-RUN mkdir -p /var/lib/prism/static/{videos,audio,metadata}
+RUN mkdir -p /var/lib/prism/static/{vedios,audio,metadata}
 
 # Expose port
 EXPOSE 8000
