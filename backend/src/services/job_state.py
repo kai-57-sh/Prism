@@ -21,7 +21,7 @@ VALID_TRANSITIONS = {
     "CREATED": ["SUBMITTED", "FAILED"],
     "SUBMITTED": ["RUNNING", "FAILED"],
     "RUNNING": ["SUCCEEDED", "FAILED"],
-    "SUCCEEDED": ["RUNNING"],  # Allow finalization/revision workflows to restart
+    "SUCCEEDED": ["SUBMITTED", "RUNNING"],  # Allow queued render/finalization workflows to restart
     "FAILED": [],  # Terminal state
 }
 

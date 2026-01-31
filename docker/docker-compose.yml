@@ -21,6 +21,7 @@ services:
     environment:
       - DATABASE_URL=sqlite:///./data/jobs.db
       - REDIS_URL=redis://redis:6379/0
+      - RQ_QUEUE_NAME=prism
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
       - MODELSCOPE_API_KEY=${MODELSCOPE_API_KEY}
       - QWEN_MODEL=qwen3-235b-a22b
@@ -34,6 +35,29 @@ services:
     networks:
       - prism-network
     restart: unless-stopped
+
+  worker:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_URL=sqlite:///./data/jobs.db
+      - REDIS_URL=redis://redis:6379/0
+      - RQ_QUEUE_NAME=prism
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
+      - MODELSCOPE_API_KEY=${MODELSCOPE_API_KEY}
+      - QWEN_MODEL=qwen3-235b-a22b
+      - STATIC_ROOT=/var/lib/prism/static
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - backend_data:/app/data
+      - video_storage:/var/lib/prism/static
+    depends_on:
+      - redis
+    networks:
+      - prism-network
+    restart: unless-stopped
+    command: ["rq", "worker", "--url", "redis://redis:6379/0", "prism"]
 
   frontend:
     build:

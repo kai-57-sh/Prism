@@ -46,6 +46,7 @@ class Settings(BaseSettings):
 
     # Redis
     redis_url: str = Field(default="redis://localhost:6379/0", env="REDIS_URL")
+    rq_queue_name: str = Field(default="prism", env="RQ_QUEUE_NAME")
 
     # Static Storage
     static_root: str = Field(default="/var/lib/prism/static", env="STATIC_ROOT")

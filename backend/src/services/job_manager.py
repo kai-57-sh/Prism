@@ -423,6 +423,7 @@ class JobManager:
         db: Session,
         job_id: str,
         client_ip: str,
+        skip_rate_limit: bool = False,
     ) -> JobModel:
         """
         Execute video generation workflow for an existing planned job.
@@ -448,16 +449,17 @@ class JobManager:
         if job.shot_assets:
             raise ValueError("Job already has generated assets")
 
-        rate_limit_result = self.rate_limiter.check_rate_limit(client_ip)
-        if not rate_limit_result["allowed"]:
-            raise ValueError(f"Rate limit exceeded. Try again at {rate_limit_result['reset_at']}")
+        if not skip_rate_limit:
+            rate_limit_result = self.rate_limiter.check_rate_limit(client_ip)
+            if not rate_limit_result["allowed"]:
+                raise ValueError(f"Rate limit exceeded. Try again at {rate_limit_result['reset_at']}")
 
-        concurrent_result = self.rate_limiter.check_concurrent_jobs(client_ip)
-        if not concurrent_result["allowed"]:
-            raise ValueError(
-                f"Concurrent job limit reached. Current: {concurrent_result['current']}, "
-                f"Max: {concurrent_result['max']}"
-            )
+            concurrent_result = self.rate_limiter.check_concurrent_jobs(client_ip)
+            if not concurrent_result["allowed"]:
+                raise ValueError(
+                    f"Concurrent job limit reached. Current: {concurrent_result['current']}, "
+                    f"Max: {concurrent_result['max']}"
+                )
 
         # Transition to RUNNING
         if job.state == "CREATED":
