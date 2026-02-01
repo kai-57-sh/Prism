@@ -13,6 +13,9 @@ COPY frontend/tailwind.config.js ./
 COPY frontend/src ./src
 COPY frontend/public ./public
 
+ARG VITE_BASE=./
+ENV VITE_BASE=$VITE_BASE
+
 RUN npm run build
 
 FROM python:3.11-slim
