@@ -1,12 +1,17 @@
 import axios from 'axios';
 
-const assetsBase = new URL('./', import.meta.url);
-const appBase = new URL('../', assetsBase);
+const apiBaseUrl = (() => {
+  if (import.meta.env.DEV) {
+    return '/api/v1/t2v';
+  }
+  const assetsBase = new URL('./', import.meta.url);
+  const appBase = new URL('../', assetsBase);
+  return new URL('v1/t2v', appBase).toString();
+})();
 
 // API Client configuration
-// Derive the app base from the bundled asset URL so requests stay under the studio prefix.
 const apiClient = axios.create({
-  baseURL: new URL('api/v1/t2v', appBase).toString(),
+  baseURL: apiBaseUrl,
   headers: {
     'Content-Type': 'application/json',
   },
