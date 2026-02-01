@@ -1,13 +1,6 @@
 import axios from 'axios';
 
-const apiBaseUrl = (() => {
-  if (import.meta.env.DEV) {
-    return '/api/v1/t2v';
-  }
-  const assetsBase = new URL('./', import.meta.url);
-  const appBase = new URL('../', assetsBase);
-  return new URL('v1/t2v', appBase).toString();
-})();
+const apiBaseUrl = import.meta.env.DEV ? '/api/v1/t2v' : './v1/t2v';
 
 // API Client configuration
 const apiClient = axios.create({
