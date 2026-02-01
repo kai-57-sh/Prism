@@ -2,11 +2,18 @@ import axios from 'axios';
 
 const apiBaseUrl = import.meta.env.DEV ? '/api/v1/t2v' : './v1/t2v';
 
+const studioToken = (() => {
+  if (typeof window === 'undefined') return null;
+  const params = new URLSearchParams(window.location.search);
+  return params.get('studio_token');
+})();
+
 // API Client configuration
 const apiClient = axios.create({
   baseURL: apiBaseUrl,
   headers: {
     'Content-Type': 'application/json',
+    ...(studioToken ? { 'X-Studio-Token': studioToken } : {}),
   },
 });
 

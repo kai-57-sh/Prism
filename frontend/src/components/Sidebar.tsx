@@ -11,10 +11,10 @@ export const Sidebar = () => {
   const [selectedStyle, setSelectedStyle] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const styleOptions = [
-    { label: '扁平插画', promptValue: '扁平插画' },
-    { label: '3D 卡通', promptValue: '3D卡通' },
-    { label: '真人实拍', promptValue: '真人实拍' },
-    { label: 'MG 动画', promptValue: 'MG动画' },
+    { label: '生活类', promptValue: 'Lifestyle' },
+    { label: '科普类', promptValue: 'Explainer' },
+    { label: '纪录片', promptValue: 'Documentary' },
+    { label: '智能推荐', promptValue: 'Auto' },
   ];
 
   useEffect(() => {
