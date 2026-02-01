@@ -1,11 +1,12 @@
 import axios from 'axios';
 
-const basePrefix = (import.meta.env.BASE_URL ?? '/').trim();
-const normalizedPrefix = basePrefix.endsWith('/') ? basePrefix : `${basePrefix}/`;
+const assetsBase = new URL('./', import.meta.url);
+const appBase = new URL('../', assetsBase);
 
 // API Client configuration
+// Derive the app base from the bundled asset URL so requests stay under the studio prefix.
 const apiClient = axios.create({
-  baseURL: `${normalizedPrefix}api/v1/t2v`,
+  baseURL: new URL('api/v1/t2v', appBase).toString(),
   headers: {
     'Content-Type': 'application/json',
   },
