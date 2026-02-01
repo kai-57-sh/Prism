@@ -1,8 +1,11 @@
 import axios from 'axios';
 
+const basePrefix = (import.meta.env.BASE_URL ?? '/').trim();
+const normalizedPrefix = basePrefix.endsWith('/') ? basePrefix : `${basePrefix}/`;
+
 // API Client configuration
 const apiClient = axios.create({
-  baseURL: '/api/v1/t2v', // Use proxy
+  baseURL: `${normalizedPrefix}api/v1/t2v`,
   headers: {
     'Content-Type': 'application/json',
   },
