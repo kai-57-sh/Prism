@@ -25,7 +25,7 @@ export const VideoView = () => {
   const [volume, setVolume] = useState(0.8);
   const [isVolumeOpen, setIsVolumeOpen] = useState(false);
   const [isDownloadOpen, setIsDownloadOpen] = useState(false);
-  const [downloadBusy, setDownloadBusy] = useState({ video: false, audio: false });
+  const [downloadBusy, setDownloadBusy] = useState({ video: false, audio: false, all: false });
   const volumeWrapRef = useRef<HTMLDivElement>(null);
   const downloadWrapRef = useRef<HTMLDivElement>(null);
   const [shotEdits, setShotEdits] = useState<Record<number, { visual: string; narration: string }>>({});
@@ -80,31 +80,32 @@ export const VideoView = () => {
       }
   };
 
-  const downloadAsset = async (url: string, kind: "video" | "audio") => {
-      if (!url || downloadBusy[kind]) return;
+  const downloadFile = async (url: string, fallbackName: string) => {
       const resolvedUrl = normalizeAssetUrl(url);
       const cacheBustedUrl = resolvedUrl
           ? `${resolvedUrl}${resolvedUrl.includes("?") ? "&" : "?"}t=${Date.now()}`
           : resolvedUrl;
+      const response = await fetch(cacheBustedUrl, { mode: "cors", cache: "no-store" });
+      if (!response.ok) {
+          throw new Error(`Download failed: ${response.status}`);
+      }
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = resolveDownloadName(cacheBustedUrl, fallbackName);
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(blobUrl);
+  };
+
+  const downloadAsset = async (url: string, kind: "video" | "audio") => {
+      if (!url || downloadBusy[kind] || downloadBusy.all) return;
       setDownloadBusy((prev) => ({ ...prev, [kind]: true }));
       try {
-          const response = await fetch(cacheBustedUrl, { mode: "cors", cache: "no-store" });
-          if (!response.ok) {
-              throw new Error(`Download failed: ${response.status}`);
-          }
-          const blob = await response.blob();
-          const blobUrl = window.URL.createObjectURL(blob);
-          const link = document.createElement("a");
-          link.href = blobUrl;
-          link.download = resolveDownloadName(
-              cacheBustedUrl,
-              kind === "video" ? "video.mp4" : "audio.mp3"
-          );
-          link.style.display = "none";
-          document.body.appendChild(link);
-          link.click();
-          link.remove();
-          window.URL.revokeObjectURL(blobUrl);
+          await downloadFile(url, kind === "video" ? "video.mp4" : "audio.mp3");
           setIsDownloadOpen(false);
       } catch (error) {
           console.error("Download error:", error);
@@ -117,6 +118,49 @@ export const VideoView = () => {
       } finally {
           setDownloadBusy((prev) => ({ ...prev, [kind]: false }));
       }
+  };
+
+  const collectAllDownloadItems = () => {
+      const assets = shotAssets && shotAssets.length > 0 ? shotAssets : (activeAsset ? [activeAsset] : []);
+      const items: Array<{ url: string; fallback: string }> = [];
+      assets.forEach((asset, index) => {
+          const shotLabel = asset?.shot_id ? `shot_${asset.shot_id}` : `shot_${index + 1}`;
+          if (asset?.video_url) {
+              items.push({ url: asset.video_url, fallback: `${shotLabel}_video.mp4` });
+          }
+          if (asset?.audio_url) {
+              items.push({ url: asset.audio_url, fallback: `${shotLabel}_audio.mp3` });
+          }
+      });
+      return items;
+  };
+
+  const downloadAllAssets = async () => {
+      if (downloadBusy.all) return;
+      const items = collectAllDownloadItems();
+      if (items.length === 0) return;
+      setDownloadBusy((prev) => ({ ...prev, all: true }));
+      let successCount = 0;
+      let failureCount = 0;
+      for (const item of items) {
+          try {
+              await downloadFile(item.url, item.fallback);
+              successCount += 1;
+          } catch (error) {
+              console.error("Batch download error:", error);
+              failureCount += 1;
+          }
+      }
+      setIsDownloadOpen(false);
+      if (failureCount > 0) {
+          addMessage(
+              "ai",
+              successCount === 0
+                  ? "音视频批量下载失败，可能是静态资源跨域或文件不存在。"
+                  : `部分下载失败（成功 ${successCount} 个，失败 ${failureCount} 个）。`
+          );
+      }
+      setDownloadBusy((prev) => ({ ...prev, all: false }));
   };
 
   // Placeholder images for filmstrip effect - using colored placeholders to avoid CORB
@@ -897,7 +941,7 @@ export const VideoView = () => {
                                 </div>
                             )}
                          </div>
-                         <div className="relative" ref={downloadWrapRef}>
+                         <div className="relative z-20" ref={downloadWrapRef}>
                             <button
                                 className="text-zinc-400 hover:text-white"
                                 onClick={() => {
@@ -909,7 +953,19 @@ export const VideoView = () => {
                                 <Download size={20} />
                             </button>
                             {isDownloadOpen && (
-                                <div className="absolute right-0 bottom-8 bg-zinc-900 border border-zinc-700 rounded-lg p-2 shadow-lg min-w-[140px]">
+                                <div className="absolute right-0 bottom-8 z-50 bg-zinc-900 border border-zinc-700 rounded-lg p-2 shadow-lg min-w-[140px]">
+                                    <button
+                                        type="button"
+                                        className={`block w-full text-left px-3 py-2 rounded text-xs transition-colors ${
+                                            !downloadBusy.all && (currentVideoUrl || currentAudioUrl)
+                                                ? "text-zinc-200 hover:bg-zinc-800"
+                                                : "text-zinc-500 cursor-not-allowed"
+                                        }`}
+                                        disabled={downloadBusy.all || (!currentVideoUrl && !currentAudioUrl)}
+                                        onClick={downloadAllAssets}
+                                    >
+                                        {downloadBusy.all ? "下载中..." : "下载全部音视频"}
+                                    </button>
                                     <button
                                         type="button"
                                         className={`block w-full text-left px-3 py-2 rounded text-xs transition-colors ${
