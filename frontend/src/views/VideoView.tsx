@@ -25,6 +25,7 @@ export const VideoView = () => {
   const [volume, setVolume] = useState(0.8);
   const [isVolumeOpen, setIsVolumeOpen] = useState(false);
   const [isDownloadOpen, setIsDownloadOpen] = useState(false);
+  const [downloadBusy, setDownloadBusy] = useState({ video: false, audio: false });
   const volumeWrapRef = useRef<HTMLDivElement>(null);
   const downloadWrapRef = useRef<HTMLDivElement>(null);
   const [shotEdits, setShotEdits] = useState<Record<number, { visual: string; narration: string }>>({});
@@ -55,6 +56,68 @@ export const VideoView = () => {
   const currentVideoUrl = activeAsset?.video_url || "";
   const currentAudioUrl = activeAsset?.audio_url || "";
   const isVideo = Boolean(currentVideoUrl);
+
+  const normalizeAssetUrl = (url: string) => {
+      if (!url) return "";
+      try {
+          const parsed = new URL(url, window.location.origin);
+          if (parsed.pathname.startsWith("/static/") && parsed.origin !== window.location.origin) {
+              return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+          }
+          return parsed.toString();
+      } catch {
+          return url;
+      }
+  };
+
+  const resolveDownloadName = (url: string, fallback: string) => {
+      try {
+          const resolved = new URL(url, window.location.origin);
+          const parts = resolved.pathname.split("/").filter(Boolean);
+          return parts[parts.length - 1] || fallback;
+      } catch {
+          return fallback;
+      }
+  };
+
+  const downloadAsset = async (url: string, kind: "video" | "audio") => {
+      if (!url || downloadBusy[kind]) return;
+      const resolvedUrl = normalizeAssetUrl(url);
+      const cacheBustedUrl = resolvedUrl
+          ? `${resolvedUrl}${resolvedUrl.includes("?") ? "&" : "?"}t=${Date.now()}`
+          : resolvedUrl;
+      setDownloadBusy((prev) => ({ ...prev, [kind]: true }));
+      try {
+          const response = await fetch(cacheBustedUrl, { mode: "cors", cache: "no-store" });
+          if (!response.ok) {
+              throw new Error(`Download failed: ${response.status}`);
+          }
+          const blob = await response.blob();
+          const blobUrl = window.URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = blobUrl;
+          link.download = resolveDownloadName(
+              cacheBustedUrl,
+              kind === "video" ? "video.mp4" : "audio.mp3"
+          );
+          link.style.display = "none";
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          window.URL.revokeObjectURL(blobUrl);
+          setIsDownloadOpen(false);
+      } catch (error) {
+          console.error("Download error:", error);
+          addMessage(
+              "ai",
+              kind === "video"
+                  ? "视频下载失败，可能是静态资源跨域或文件不存在。"
+                  : "音频下载失败，可能是静态资源跨域或文件不存在。"
+          );
+      } finally {
+          setDownloadBusy((prev) => ({ ...prev, [kind]: false }));
+      }
+  };
 
   // Placeholder images for filmstrip effect - using colored placeholders to avoid CORB
   const getPlaceholderStyle = (index: number) => {
@@ -109,6 +172,9 @@ export const VideoView = () => {
     const interval = window.setInterval(async () => {
         try {
             const status = await api.getJobStatus(currentJobId);
+            if (status.assets && status.assets.length > 0) {
+                setShotAssets(status.assets);
+            }
             if (status.status === 'SUCCEEDED') {
                 if (status.assets) setShotAssets(status.assets);
                 setAppState('COMPLETED');
@@ -844,30 +910,30 @@ export const VideoView = () => {
                             </button>
                             {isDownloadOpen && (
                                 <div className="absolute right-0 bottom-8 bg-zinc-900 border border-zinc-700 rounded-lg p-2 shadow-lg min-w-[140px]">
-                                    <a
-                                        className={`block px-3 py-2 rounded text-xs transition-colors ${
-                                            currentVideoUrl ? "text-zinc-200 hover:bg-zinc-800" : "text-zinc-500 cursor-not-allowed"
+                                    <button
+                                        type="button"
+                                        className={`block w-full text-left px-3 py-2 rounded text-xs transition-colors ${
+                                            currentVideoUrl && !downloadBusy.video
+                                                ? "text-zinc-200 hover:bg-zinc-800"
+                                                : "text-zinc-500 cursor-not-allowed"
                                         }`}
-                                        href={currentVideoUrl || undefined}
-                                        download
-                                        onClick={(e) => {
-                                            if (!currentVideoUrl) e.preventDefault();
-                                        }}
+                                        disabled={!currentVideoUrl || downloadBusy.video}
+                                        onClick={() => downloadAsset(currentVideoUrl, "video")}
                                     >
-                                        下载视频
-                                    </a>
-                                    <a
-                                        className={`block px-3 py-2 rounded text-xs transition-colors ${
-                                            currentAudioUrl ? "text-zinc-200 hover:bg-zinc-800" : "text-zinc-500 cursor-not-allowed"
+                                        {downloadBusy.video ? "下载中..." : "下载视频"}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className={`block w-full text-left px-3 py-2 rounded text-xs transition-colors ${
+                                            currentAudioUrl && !downloadBusy.audio
+                                                ? "text-zinc-200 hover:bg-zinc-800"
+                                                : "text-zinc-500 cursor-not-allowed"
                                         }`}
-                                        href={currentAudioUrl || undefined}
-                                        download
-                                        onClick={(e) => {
-                                            if (!currentAudioUrl) e.preventDefault();
-                                        }}
+                                        disabled={!currentAudioUrl || downloadBusy.audio}
+                                        onClick={() => downloadAsset(currentAudioUrl, "audio")}
                                     >
-                                        下载音频
-                                    </a>
+                                        {downloadBusy.audio ? "下载中..." : "下载音频"}
+                                    </button>
                                 </div>
                             )}
                          </div>

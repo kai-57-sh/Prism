@@ -531,12 +531,33 @@ class JobManager:
         Returns:
             List of shot asset dicts
         """
-        shot_assets = []
+        shot_assets: List[Dict[str, Any]] = []
+        shot_order = [req.get("shot_id") for req in shot_requests if req.get("shot_id") is not None]
+        shot_assets_by_shot: Dict[int, List[Dict[str, Any]]] = {shot_id: [] for shot_id in shot_order}
         external_task_ids: List[str] = []
+        asset_update_lock = asyncio.Lock()
         quality_mode = job.quality_mode
 
         # Get number of preview seeds based on quality mode
         default_preview_seeds = QUALITY_MODES[quality_mode]["preview_seeds"]
+
+        async def _append_and_persist(asset: Dict[str, Any]) -> None:
+            async with asset_update_lock:
+                shot_id = asset.get("shot_id")
+                if shot_id is not None:
+                    if shot_id not in shot_assets_by_shot:
+                        shot_order.append(shot_id)
+                        shot_assets_by_shot[shot_id] = []
+                    shot_assets_by_shot[shot_id].append(asset)
+
+                ordered_assets: List[Dict[str, Any]] = []
+                for ordered_shot_id in shot_order:
+                    ordered_assets.extend(shot_assets_by_shot.get(ordered_shot_id, []))
+
+                shot_assets.clear()
+                shot_assets.extend(ordered_assets)
+                # Persist incremental assets so RUNNING jobs can return partial results.
+                JobDB.update_job_assets(db, job.job_id, list(shot_assets))
 
         async def _generate_shot_candidates(
             shot_request: Dict[str, Any],
@@ -639,6 +660,7 @@ class JobManager:
                         }
 
                         shot_candidates.append(asset)
+                        await _append_and_persist(asset)
 
                     else:
                         # Generation failed
@@ -664,8 +686,6 @@ class JobManager:
         results = await asyncio.gather(*tasks) if tasks else []
 
         for candidates, task_ids in results:
-            if candidates:
-                shot_assets.extend(candidates)
             external_task_ids.extend(task_ids)
 
         if external_task_ids:

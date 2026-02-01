@@ -493,10 +493,11 @@ async def get_job_status(
             if script:
                 response_data["script"] = script
 
-        # Add output metadata if job succeeded
-        if job.state == "SUCCEEDED":
+        # Add assets for RUNNING/SUCCEEDED jobs (partial assets during RUNNING)
+        if job.state in {"RUNNING", "SUCCEEDED"}:
             response_data["resolution"] = job.resolution
-            response_data["total_duration_s"] = job.total_duration_s
+            if job.state == "SUCCEEDED":
+                response_data["total_duration_s"] = job.total_duration_s
 
             normalized_assets = _normalize_shot_assets(job.shot_assets, job.resolution)
             if normalized_assets:

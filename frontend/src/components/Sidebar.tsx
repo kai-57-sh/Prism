@@ -28,10 +28,12 @@ export const Sidebar = () => {
           try {
               const status = await api.getJobStatus(jobId);
               
+              if (status.assets && status.assets.length > 0) {
+                  setShotAssets(status.assets);
+              }
               if (status.status === 'SUCCEEDED') {
                   clearInterval(interval);
                   if (status.assets && status.assets.length > 0) {
-                      setShotAssets(status.assets);
                       setAppState('COMPLETED');
                       addMessage('ai', '视频生成完成！请在右侧查看。');
                   } else {
