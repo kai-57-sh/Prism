@@ -6,14 +6,16 @@ dependencies, and error branches.
 
 ## Scope
 
-- Primary flow: `POST /v1/t2v/generate` (text to video generation)
+- Primary flows:
+  - `POST /v1/t2v/generate` (synchronous full generation)
+  - `POST /v1/t2v/plan` + `POST /v1/t2v/jobs/{job_id}/render` (recommended async path)
 - Support flows: `GET /v1/t2v/jobs/{job_id}`, `POST /v1/t2v/jobs/{job_id}/revise`,
-  `POST /v1/t2v/jobs/{job_id}/finalize`
+  `POST /v1/t2v/jobs/{job_id}/finalize`, shot update/regenerate
 - Data stores: `jobs` and `templates` tables, filesystem static assets
-- External services: LLM, embeddings, DashScope video, Redis, ffmpeg
+- External services: LLM, embeddings, DashScope video, Redis, ffmpeg, RQ worker
 
-Note: `POST /v1/t2v/generate` executes the full workflow synchronously and returns
-after generation completes, even though it returns HTTP 202.
+Note: `POST /v1/t2v/generate` executes the full workflow inside the request and
+returns after generation completes (still with HTTP 202).
 
 ## Data Stores
 
@@ -21,15 +23,17 @@ after generation completes, even though it returns HTTP 202.
   - `jobs` table (see `backend/src/models/job.py`)
     - Inputs: `user_input_redacted`, `user_input_hash`, `pii_flags`
     - Pipeline: `ir`, `shot_plan`, `shot_requests`
-    - Outputs: `shot_assets`, `preview_shot_assets`, `selected_seeds`, `resolution`,
-      `total_duration_s`
+    - Outputs: `shot_assets` (may include multiple candidates per shot),
+      `preview_shot_assets` (currently not written), `selected_seeds`,
+      `resolution`, `total_duration_s`
     - Lifecycle: `state`, `state_transitions`, timestamps
     - Errors: `error_details`, retry fields
   - `templates` table (see `backend/src/models/template.py`)
     - `template_id`, `version`, `tags`, `constraints`, `shot_skeletons`,
       `negative_prompt_base`
-- Filesystem static storage (default `/var/lib/prism/static`, fallback `./data`)
-  - `videos/`, `audio/`, `metadata/` subdirs via `AssetStorage`
+- Filesystem static storage
+  - Default: `/var/lib/prism/static`, fallback to `backend/data`
+  - Subdirs: `vedios/`, `audio/`, `metadata/` (note spelling `vedios`)
 
 ## External Dependencies
 
@@ -41,6 +45,7 @@ after generation completes, even though it returns HTTP 202.
   - `Wan26RetryAdapter` submit/poll
 - Redis
   - Rate limiting and concurrent job tracking
+  - RQ queue for `/render` async jobs
 - HTTP download (httpx)
   - Download generated videos from DashScope URL
 - ffmpeg/ffprobe
@@ -51,16 +56,16 @@ after generation completes, even though it returns HTTP 202.
 ```mermaid
 stateDiagram-v2
     [*] --> CREATED
-    CREATED --> SUBMITTED : job_created
+    CREATED --> SUBMITTED : job_created / planning_submitted
     CREATED --> FAILED : generation_failed
-    SUBMITTED --> RUNNING : generation_started
+    SUBMITTED --> RUNNING : generation_started / planning_started
     SUBMITTED --> FAILED : generation_failed
-    RUNNING --> SUCCEEDED : generation_complete
+    RUNNING --> SUCCEEDED : generation_complete / planning_complete
     RUNNING --> FAILED : generation_failed
     SUCCEEDED --> RUNNING : finalization_started / revision_started
 ```
 
-## Sequence Diagram: Generate Flow
+## Sequence Diagram: Generate Flow (Sync)
 
 ```mermaid
 sequenceDiagram
@@ -91,14 +96,12 @@ sequenceDiagram
         IP-->>JM: redacted_text, input_hash, pii_flags
         JM->>LLM: parse_ir(aligned_text or redacted_text)
         LLM-->>JM: IR
-        JM->>TR: match_template(IR, templates)
-        TR->>DB: list templates if index empty
+        JM->>TR: match_template(IR)
+        TR-->>JM: TemplateMatch or None
         alt no template match
-            TR-->>JM: None
-            JM-->>API: ValueError (clarification or validation)
+            JM-->>API: ValueError
             API-->>Client: 400 (CLARIFICATION_REQUIRED / VALIDATION_ERROR)
         else match
-            TR-->>JM: TemplateMatch
             JM->>LLM: instantiate_template(IR, template)
             LLM-->>JM: ShotPlan
             JM->>JM: normalize_shot_plan
@@ -112,7 +115,7 @@ sequenceDiagram
                 PC-->>JM: shot_requests
                 JM->>DB: JobDB.create_job(...) -> jobs
                 JM->>DB: transition_state SUBMITTED -> RUNNING
-                loop per shot (and per preview seed)
+                loop per shot (preview seeds by quality mode)
                     JM->>W26: submit_shot_request_with_retry
                     W26-->>JM: task_id
                     JM->>W26: poll_task_status
@@ -127,13 +130,14 @@ sequenceDiagram
                             FF-->>JM: error
                             JM->>JM: fallback store video only
                         end
-                        JM->>FS: get paths/urls + write metadata
+                        JM->>FS: paths/urls + write metadata
+                        JM->>DB: update_job_assets (incremental)
                     else generation failed
                         W26-->>JM: error
                         JM->>JM: log error and continue
                     end
                 end
-                JM->>DB: update_job_assets or update_job_error
+                JM->>DB: update_job_assets
                 JM->>FS: write_job_metadata(job_id)
                 JM->>DB: transition_state RUNNING -> SUCCEEDED/FAILED
                 API-->>Client: 202 (job_id, status)
@@ -142,34 +146,52 @@ sequenceDiagram
     end
 ```
 
-## Flowchart: Generate Pipeline (with Error Branches)
+## Sequence Diagram: Plan + Render (Async)
 
 ```mermaid
-flowchart TD
-    A[HTTP POST /v1/t2v/generate] --> B[Validate request fields]
-    B --> C[Rate limit + concurrent limit (Redis)]
-    C -->|blocked| C1[Return 400 VALIDATION_ERROR]
-    C -->|allowed| D[InputProcessor: redact + detect + align]
-    D --> E[LLM: parse IR]
-    E --> F[TemplateRouter: match template]
-    F -->|no match| F1[Return 400 CLARIFICATION_REQUIRED]
-    F -->|match| G[LLM: instantiate template -> ShotPlan]
-    G --> H[Validator: validate parameters]
-    H -->|invalid| H1[Return 400 VALIDATION_ERROR]
-    H -->|ok| I[PromptCompiler: compile per-shot prompts]
-    I --> J[JobDB.create_job -> jobs table]
-    J --> K[Transition SUBMITTED -> RUNNING]
-    K --> L[Wan2.6: submit + poll]
-    L -->|failed| L1[Log error, continue]
-    L -->|succeeded| M[Download video (HTTPX)]
-    M --> N[FFmpeg split video/audio]
-    N -->|ffmpeg failed| N1[Store video only]
-    N -->|ok| O[Store video+audio]
-    N1 --> O
-    O --> P[AssetStorage: URLs + metadata JSON]
-    P --> Q[Update job assets + write metadata]
-    Q --> R[Transition RUNNING -> SUCCEEDED/FAILED]
-    R --> S[Return 202 + job_id]
+sequenceDiagram
+    autonumber
+    participant Client
+    participant API as FastAPI /v1/t2v/plan
+    participant JM as JobManager
+    participant LLM as LLMOrchestrator
+    participant TR as TemplateRouter
+    participant DB as SQLite
+
+    Client->>API: POST /v1/t2v/plan
+    API->>JM: execute_planning_workflow(...)
+    JM->>LLM: parse_ir
+    JM->>TR: match_template
+    JM->>LLM: instantiate_template
+    JM->>DB: create job (shot_plan + shot_requests)
+    JM->>DB: transition SUBMITTED -> RUNNING -> SUCCEEDED
+    API-->>Client: 202 (job_id)
+```
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Client
+    participant API as FastAPI /v1/t2v/jobs/{job_id}/render
+    participant RL as RateLimiter (Redis)
+    participant RQ as RQ Queue
+    participant Worker as rq worker
+    participant JM as JobManager
+    participant DB as SQLite
+
+    Client->>API: POST /render
+    API->>RL: check_rate_limit + check_concurrent_jobs
+    alt blocked
+        API-->>Client: 400 (RENDER_ERROR)
+    else allowed
+        API->>RQ: enqueue run_render_job(job_id)
+        API-->>Client: 202 (queued)
+        RQ->>Worker: run_render_job
+        Worker->>JM: execute_generation_from_job(...)
+        JM->>DB: transition SUBMITTED -> RUNNING
+        JM->>DB: update assets incrementally
+        JM->>DB: transition RUNNING -> SUCCEEDED/FAILED
+    end
 ```
 
 ## Sequence Diagram: Job Status Query
@@ -184,31 +206,23 @@ sequenceDiagram
     Client->>API: GET /v1/t2v/jobs/{job_id}
     API->>DB: JobDB.get_job(job_id)
     alt job not found
-        DB-->>API: None
         API-->>Client: 404 JOB_NOT_FOUND
     else found
-        DB-->>API: JobModel
-        API-->>Client: 200 with status + assets (if SUCCEEDED)
+        API-->>Client: 200 with status + shot_plan + assets
     end
 ```
 
-## Sequence Diagram: Revision Flow
+## Sequence Diagram: Revision Flow (Sync)
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant Client
     participant API as FastAPI /v1/t2v/jobs/{job_id}/revise
-    participant DB as SQLite (jobs/templates)
-    participant FP as FeedbackParser (ModelScope)
+    participant DB as SQLite
+    participant FP as FeedbackParser
     participant V as Validator
     participant JM as JobManager
-    participant LLM as LLMOrchestrator
-    participant PC as PromptCompiler
-    participant W26 as Wan26Adapter
-    participant DL as Wan26Downloader
-    participant FF as FFmpeg
-    participant FS as AssetStorage
 
     Client->>API: POST /revise {feedback}
     API->>DB: JobDB.get_job(parent_job_id)
@@ -216,24 +230,38 @@ sequenceDiagram
         API-->>Client: 404 or 400 INVALID_JOB_STATE
     else ok
         API->>FP: parse_feedback(feedback, previous_ir)
-        FP-->>API: targeted_fields + suggested_modifications
-        API->>V: validate_refinement(feedback, targeted_fields)
-        alt invalid refinement
+        API->>V: validate_refinement
+        alt invalid
             API-->>Client: 400 INVALID_REFINEMENT
         else ok
             API->>JM: execute_revision_workflow(...)
-            JM->>DB: load template
-            JM->>LLM: instantiate_template(modified IR)
-            JM->>PC: compile prompts for targeted shots
-            JM->>DB: create new job (revision_of=parent)
-            JM->>W26: generate per shot (submit/poll)
-            JM->>DL: download
-            JM->>FF: split
-            JM->>FS: write metadata
+            JM->>DB: create new job
+            JM->>DB: generate shots (sync in request)
             JM->>DB: update assets + transition SUCCEEDED/FAILED
             API-->>Client: 202 (new job_id)
         end
     end
+```
+
+## Sequence Diagram: Shot Update / Regenerate
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Client
+    participant API as FastAPI /v1/t2v/jobs/{job_id}/shots/{shot_id}
+    participant DB as SQLite
+    participant JM as JobManager
+
+    Client->>API: PATCH /shots/{shot_id}
+    API->>DB: update shot_plan
+    API-->>Client: updated shot
+
+    Client->>API: POST /shots/{shot_id}/regenerate
+    API->>DB: check job state SUCCEEDED
+    API->>JM: compile_shot_prompt + generate single shot
+    JM->>DB: update assets
+    API-->>Client: new asset
 ```
 
 ## Sequence Diagram: Finalization Flow
@@ -243,29 +271,20 @@ sequenceDiagram
     autonumber
     participant Client
     participant API as FastAPI /v1/t2v/jobs/{job_id}/finalize
-    participant DB as SQLite (jobs)
+    participant DB as SQLite
     participant JM as JobManager
-    participant W26 as Wan26Adapter
-    participant DL as Wan26Downloader
-    participant FF as FFmpeg
-    participant FS as AssetStorage
 
     Client->>API: POST /finalize {selected_seeds}
     API->>DB: JobDB.get_job(job_id)
     alt not found or not SUCCEEDED
         API-->>Client: 404 or 400 INVALID_JOB_STATE
     else ok
-        API->>API: validate seeds against preview_shot_assets
-        alt no preview assets or invalid seeds
-            API-->>Client: 400 NO_PREVIEW_ASSETS / INVALID_SEEDS
+        API->>API: validate preview_shot_assets
+        alt no preview assets
+            API-->>Client: 400 NO_PREVIEW_ASSETS
         else ok
-            API->>JM: execute_finalization_workflow(...)
-            JM->>DB: update selected_seeds + transition RUNNING
-            JM->>W26: generate selected shots at 1920x1080
-            JM->>DL: download
-            JM->>FF: split
-            JM->>FS: write metadata
-            JM->>DB: update assets + transition SUCCEEDED/FAILED
+            API->>JM: execute_finalization_workflow
+            JM->>DB: transition RUNNING -> SUCCEEDED/FAILED
             API-->>Client: 202 (job_id)
         end
     end
@@ -281,7 +300,7 @@ Paths are generated by `AssetStorage` in `backend/src/services/asset_storage.py`
 
 ## Error Handling (API Layer)
 
-- Request validation failures are returned as 400 with `VALIDATION_ERROR`
-  (`backend/src/api/main.py`).
-- `ValueError` is mapped to 400 with `INVALID_VALUE`.
+- Request validation failures are returned as 400 with `VALIDATION_ERROR`.
+- `ValueError` can be mapped to 400 with `INVALID_VALUE` by the global handler,
+  but most route handlers convert `ValueError` to `VALIDATION_ERROR` explicitly.
 - Any unhandled exception becomes 500 with `INTERNAL_ERROR`.
